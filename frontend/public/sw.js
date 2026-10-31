@@ -1,7 +1,7 @@
 // === Antigravity Deck — Service Worker ===
 // Handles: PWA install, app shell caching, notification display, notification click
 
-const SW_VERSION = '1.1.1';
+const SW_VERSION = '1.2.0';
 const CACHE_NAME = `ag-deck-${SW_VERSION}`;
 
 // === Install ===
@@ -50,9 +50,24 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // App shell (HTML pages, /_next/data/...) — stale-while-revalidate
-  // Serve cached version instantly, update cache in background
-  const isNavigationOrData = event.request.mode === 'navigate' ||
+  // Navigations (HTML page loads) — network-first, fallback to cache for offline support
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // App shell assets (/ _next/data/...) — stale-while-revalidate
+  const isNavigationOrData =
     url.pathname.startsWith('/_next/data/') ||
     url.pathname.startsWith('/_next/') ||
     event.request.destination === 'script' ||

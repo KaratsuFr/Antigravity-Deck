@@ -258,20 +258,42 @@ function virtualInstance(hub, uri, active = false) {
     };
 }
 
-// Query the hub for the list of currently tracked workspace URIs (GetWorkspaceInfos).
+// Query the hub for the list of currently tracked workspace URIs.
+// Tries GetWorkspaceInfos first (IDE), falls back to GetAllCascadeTrajectories (CLI daemon / headless).
 async function getTrackedWorkspaceUris(hub) {
+    const uris = new Set();
+    const protocol = hub.useTls ? 'https' : 'http';
+    const host = hub.useTls ? '127.0.0.1' : 'localhost';
+    const headers = { 'Content-Type': 'application/json', 'Connect-Protocol-Version': '1', 'X-Codeium-Csrf-Token': hub.csrfToken };
+
     try {
-        const protocol = hub.useTls ? 'https' : 'http';
-        const host = hub.useTls ? '127.0.0.1' : 'localhost';
-        const headers = { 'Content-Type': 'application/json', 'Connect-Protocol-Version': '1', 'X-Codeium-Csrf-Token': hub.csrfToken };
         const url = `${protocol}://${host}:${hub.port}/exa.language_server_pb.LanguageServerService/GetWorkspaceInfos`;
         const res = await connectPost(url, headers, '{}', 8000);
-        if (!res.ok) return [];
-        const data = await res.json();
-        return (data.workspaceInfos || []).map(w => w.workspaceUri).filter(Boolean);
-    } catch {
-        return [];
+        if (res.ok) {
+            const data = await res.json();
+            (data.workspaceInfos || []).forEach(w => { if (w.workspaceUri) uris.add(w.workspaceUri); });
+        }
+    } catch { }
+
+    if (uris.size === 0) {
+        try {
+            const url = `${protocol}://${host}:${hub.port}/exa.language_server_pb.LanguageServerService/GetAllCascadeTrajectories`;
+            const res = await connectPost(url, headers, '{}', 8000);
+            if (res.ok) {
+                const data = await res.json();
+                for (const info of Object.values(data.trajectorySummaries || {})) {
+                    for (const ws of info.workspaces || []) {
+                        if (ws.workspaceFolderAbsoluteUri) uris.add(ws.workspaceFolderAbsoluteUri);
+                    }
+                    for (const u of info.trajectoryMetadata?.workspaceUris || []) {
+                        if (u) uris.add(u);
+                    }
+                }
+            }
+        } catch { }
     }
+
+    return Array.from(uris);
 }
 
 // Locate the hub process among detected LS processes and resolve its API port.
@@ -338,6 +360,9 @@ function rebuildInstances(hub, uris) {
     }
     lsInstances.length = 0;
     for (const uri of unique) lsInstances.push(virtualInstance(hub, uri, false));
+    if (lsInstances.length === 0) {
+        lsInstances.push(virtualInstance(hub, null, true));
+    }
 
     // Restore active selection (or default to the first workspace)
     let activeIdx = prevActiveName

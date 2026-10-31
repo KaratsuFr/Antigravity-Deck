@@ -65,7 +65,7 @@ function startPolling() {
 // --- Poll tick: discover ALL running conversations across ALL LS instances ---
 
 async function pollNow() {
-    if (lsInstances.length === 0) return;
+    if (lsInstances.length === 0 && !lsConfig.detected) return;
     if (isPollRunning) return; // debounce
     isPollRunning = true;
 
@@ -78,7 +78,10 @@ async function pollNow() {
         // instances share one connection (port+csrf) and GetAllCascadeTrajectories is
         // global. Poll each unique connection once to avoid redundant identical calls.
         const seenConns = new Set();
-        for (const inst of lsInstances) {
+        const instancesToPoll = lsInstances.length > 0 ? lsInstances : [
+            { port: lsConfig.port, csrfToken: lsConfig.csrfToken, useTls: lsConfig.useTls, workspaceName: 'Default', active: true }
+        ];
+        for (const inst of instancesToPoll) {
             const connKey = `${inst.useTls ? 's' : ''}${inst.port}:${inst.csrfToken}`;
             if (seenConns.has(connKey)) continue;
             seenConns.add(connKey);

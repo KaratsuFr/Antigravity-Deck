@@ -153,6 +153,22 @@ module.exports = function setupConversationsRoutes(app) {
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
+    // Update conversation annotations (archive, pin, title)
+    app.patch('/api/conversations/:id/annotations', async (req, res) => {
+        try {
+            const inst = resolveInst(req);
+            const cascadeId = req.params.id;
+            const annotations = req.body || {};
+            const result = await callApi('UpdateConversationAnnotations', {
+                cascadeId,
+                annotations
+            }, inst);
+            const { broadcastAll } = require('../ws');
+            broadcastAll({ type: 'conversations_updated' });
+            res.json({ success: true, result });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
     // Load older steps for scroll-up pagination (binary protobuf for reliability)
     app.get('/api/conversations/:id/steps/older', async (req, res) => {
         try {

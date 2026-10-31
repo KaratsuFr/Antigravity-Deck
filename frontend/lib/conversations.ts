@@ -24,6 +24,9 @@ export interface ConvRow {
     projectName: string;
     lastModified: string;
     stepCount: number;
+    status: string;
+    archived: boolean;
+    pinned: boolean;
 }
 
 /** Loosely-typed shape of one trajectory summary as returned by /api/conversations. */
@@ -36,8 +39,55 @@ interface RawSummary {
     stepCount?: number;
     lastModifiedTime?: string;
     createdTime?: string;
+    status?: string;
+    annotations?: {
+        archived?: boolean;
+        pinned?: boolean;
+        title?: string;
+    };
     trajectoryMetadata?: { projectId?: string };
     workspaces?: RawWorkspaceRef[];
+}
+
+export const PINNED_STORAGE_KEY = 'antigravity-pinned-convs';
+
+export function getLocalPinnedSet(): Set<string> {
+    if (typeof window === 'undefined') return new Set();
+    try {
+        const raw = localStorage.getItem(PINNED_STORAGE_KEY);
+        if (!raw) return new Set();
+        return new Set(JSON.parse(raw));
+    } catch { return new Set(); }
+}
+
+export function setLocalPinned(id: string, pinned: boolean): Set<string> {
+    const set = getLocalPinnedSet();
+    if (pinned) set.add(id);
+    else set.delete(id);
+    try {
+        localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(Array.from(set)));
+    } catch {}
+    return set;
+}
+
+export async function updateConversationAnnotations(id: string, annotations: { archived?: boolean; pinned?: boolean; title?: string }) {
+    if (annotations.pinned !== undefined) {
+        setLocalPinned(id, annotations.pinned);
+    }
+    try {
+        const res = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(id)}/annotations`, {
+            method: 'PATCH',
+            headers: {
+                ...authHeaders(),
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(annotations),
+        });
+        return await res.json();
+    } catch (e) {
+        console.error('Failed to update annotations:', e);
+        return { success: false };
+    }
 }
 
 /** Compact relative time, e.g. "now", "5m", "3h", "2d", "4mo", "1y". */
@@ -94,6 +144,7 @@ export async function loadConversationIndex(): Promise<{ projects: Project[]; ro
         projects.filter(p => p.folderUri).map(p => [normUri(p.folderUri), p.id])
     );
     const summaries: Record<string, RawSummary> = cv.trajectorySummaries || {};
+    const localPinned = getLocalPinnedSet();
 
     const rows: ConvRow[] = Object.entries(summaries).map(([id, s]) => {
         const ws: RawWorkspaceRef = (s.workspaces && s.workspaces[0]) || {};
@@ -108,15 +159,25 @@ export async function loadConversationIndex(): Promise<{ projects: Project[]; ro
             ? String(ws.repository.computedName).split('/').pop()
             : '';
         const projectName = proj?.name || repoName || basename(wsUri) || '';
+        const isArchived = Boolean(s.annotations?.archived);
+        const isPinned = Boolean(s.annotations?.pinned || localPinned.has(id));
+
         return {
             id,
-            title: s.summary || 'Untitled conversation',
+            title: s.summary || s.annotations?.title || 'Untitled conversation',
             projectId: pid,
             projectName,
             lastModified: s.lastModifiedTime || s.createdTime || '',
             stepCount: s.stepCount || 0,
+            status: s.status || '',
+            archived: isArchived,
+            pinned: isPinned,
         };
-    }).sort((a, b) => (b.lastModified).localeCompare(a.lastModified));
+    }).sort((a, b) => {
+        // Pinned conversations always come first
+        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+        return (b.lastModified).localeCompare(a.lastModified);
+    });
 
     return { projects, rows };
 }

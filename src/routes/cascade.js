@@ -262,6 +262,35 @@ module.exports = function setupCascadeRoutes(app) {
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
+    // Revert to a previous step (rollback to checkpoint)
+    const revertRoute = (lsMethod) => async (req, res) => {
+        try {
+            const { stepIndex } = req.body || {};
+            if (!Number.isInteger(stepIndex) || stepIndex < -1) {
+                return res.status(400).json({ error: 'stepIndex must be an integer >= -1' });
+            }
+            const inst = resolveInst(req);
+            const result = await callApi(lsMethod, {
+                cascadeId: req.params.id,
+                stepIndex,
+                metadata: {},
+                overrideConfig: {
+                    plannerConfig: {
+                        conversational: { plannerMode: 'CONVERSATIONAL_PLANNER_MODE_DEFAULT', agenticMode: true },
+                        requestedModel: { model: req.body.modelId || 'MODEL_PLACEHOLDER_M26' },
+                        ephemeralMessagesConfig: { enabled: true },
+                        knowledgeConfig: { enabled: true }
+                    },
+                    conversationHistoryConfig: { enabled: true }
+                }
+            }, inst);
+            res.json(result);
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    };
+
+    app.post('/api/cascade/:id/revert-preview', revertRoute('GetRevertPreview'));
+    app.post('/api/cascade/:id/revert', revertRoute('RevertToCascadeStep'));
+
     // === Generic LS Proxy — call any method ===
     // Security: Method whitelist to prevent arbitrary LS method invocation
     app.post('/api/ls/:method', async (req, res) => {

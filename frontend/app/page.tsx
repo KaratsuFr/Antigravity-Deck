@@ -730,6 +730,7 @@ export default function Home() {
           {showChat && (
             <>
               <ChatView
+                key={currentConvId || 'new-chat'}
                 steps={steps}
                 baseIndex={baseIndex}
                 stepCount={stepCount}

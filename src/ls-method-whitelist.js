@@ -91,6 +91,8 @@ const MANUAL_MUTATING_LS_METHODS = [
     'HandleCascadeUserInteraction',
     'CancelCascadeInvocation',
     'DeleteCascadeTrajectory',
+    'RevertToCascadeStep',
+    'UpdateConversationAnnotations',
     'InstallCascadePlugin',
     'DeletePlugin',
     'ToggleMcpServer',

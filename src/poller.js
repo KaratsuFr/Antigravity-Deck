@@ -417,6 +417,19 @@ async function pollConversation(activeConvId, info) {
 
         cache.stepCount = newStepCount;
 
+        // Rollback: server has fewer steps than cache — truncate cache
+        const keep = Math.max(0, newStepCount - baseIdx);
+        if (keep < cache.steps.length) {
+            cache.steps.length = keep;
+            _broadcast({
+                type: 'steps_truncated',
+                conversationId: activeConvId,
+                stepCount: newStepCount,
+                baseIndex: baseIdx,
+            }, activeConvId);
+            console.log(`[poll] rollback detected: server=${newStepCount} cached=${cachedLen} — truncated cache to ${keep} steps`);
+        }
+
         if (updatedCount > 0 || newCount > 0) {
             if (!quietPoll) console.log(`[poll] ${updatedCount} updated, ${newCount} new (${cache.steps.length}/${newStepCount})`);
         }

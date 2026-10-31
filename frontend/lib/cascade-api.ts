@@ -223,6 +223,17 @@ export async function cascadeInteract(cascadeId: string, action: 'accept' | 'rej
     return res.json();
 }
 
+// Revert to a previous step (rollback to checkpoint)
+export async function cascadeRevert(cascadeId: string, stepIndex: number): Promise<object> {
+    const res = await fetch(`${API_BASE}/api/cascade/${cascadeId}/revert`, {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stepIndex })
+    });
+    if (!res.ok) throw new Error(`Revert failed: ${res.status}`);
+    return res.json();
+}
+
 // Gate options for the current WAITING interaction (dynamic, computed server-side to
 // mirror what the Antigravity IDE would show).
 export interface GateOption {

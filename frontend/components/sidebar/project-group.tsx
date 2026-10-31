@@ -1,10 +1,20 @@
 "use client"
 
 import { useState } from 'react'
-import { Trash2, ChevronRight, FolderGit2, MessageSquare, Plus } from 'lucide-react'
+import { Trash2, ChevronRight, FolderGit2, MessageSquare, Plus, Pin, Archive, ArchiveRestore, MoreHorizontal } from 'lucide-react'
 import { API_BASE } from '@/lib/config'
 import { authHeaders } from '@/lib/auth'
 import type { ConvRow } from '@/lib/conversations'
+import { updateConversationAnnotations } from '@/lib/conversations'
+import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
     Collapsible,
     CollapsibleContent,
@@ -46,6 +56,39 @@ interface ProjectGroupProps {
     /** Start a fresh conversation scoped to this project's folder. */
     onNewConversation: () => void
     onDeleted?: (convId: string) => void
+    onUpdated?: () => void
+}
+
+export function ConvStatusDot({ status, pinned }: { status?: string; pinned?: boolean }) {
+    if (status === 'CASCADE_RUN_STATUS_RUNNING') {
+        return (
+            <span className="relative flex h-2 w-2 shrink-0 mr-1.5" title="Running">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500" />
+            </span>
+        );
+    }
+    if (status === 'CASCADE_RUN_STATUS_WAITING_FOR_USER') {
+        return (
+            <span className="relative flex h-2 w-2 shrink-0 mr-1.5" title="Waiting for user input">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+            </span>
+        );
+    }
+    if (status === 'CASCADE_RUN_STATUS_ERROR') {
+        return (
+            <span className="inline-flex rounded-full h-2 w-2 bg-destructive shrink-0 mr-1.5" title="Error" />
+        );
+    }
+    if (pinned) {
+        return (
+            <span title="Pinned" className="inline-flex shrink-0 mr-1.5">
+                <Pin className="h-2.5 w-2.5 text-amber-500 fill-amber-500" />
+            </span>
+        );
+    }
+    return <MessageSquare className="h-3 w-3 shrink-0 mr-1.5 opacity-60" />;
 }
 
 export function ProjectGroup({
@@ -59,8 +102,21 @@ export function ProjectGroup({
     onSeeAll,
     onNewConversation,
     onDeleted,
+    onUpdated,
 }: ProjectGroupProps) {
     const [deleteTarget, setDeleteTarget] = useState<ConvRow | null>(null)
+
+    const handleTogglePin = async (e: React.MouseEvent, conv: ConvRow) => {
+        e.stopPropagation();
+        await updateConversationAnnotations(conv.id, { pinned: !conv.pinned });
+        onUpdated?.();
+    };
+
+    const handleToggleArchive = async (e: React.MouseEvent, conv: ConvRow) => {
+        e.stopPropagation();
+        await updateConversationAnnotations(conv.id, { archived: !conv.archived });
+        onUpdated?.();
+    };
 
     const visible = conversations.slice(0, SHOW_LIMIT)
     const hasMore = totalCount > visible.length
@@ -121,26 +177,43 @@ export function ProjectGroup({
                                 ) : (
                                     <>
                                         {visible.map(conv => (
-                                            <SidebarMenuSubItem key={conv.id} className="group/conv">
+                                            <SidebarMenuSubItem key={conv.id} className="group/conv relative flex items-center">
                                                 <SidebarMenuSubButton
                                                     isActive={conv.id === currentConvId}
-                                                    onClick={() => onSelectConv(conv.id)}
-                                                    title={`${conv.title}\n${conv.stepCount} steps · ${conv.id}`}
-                                                    className="text-xs peer pr-8"
-                                                >
-                                                    <MessageSquare className="h-3 w-3 shrink-0" />
-                                                    <span className="truncate min-w-0">{conv.title}</span>
-                                                </SidebarMenuSubButton>
-                                                <SidebarMenuAction
-                                                    className="!top-1/2 !-translate-y-1/2 opacity-100 sm:opacity-0 sm:group-hover/conv:opacity-100 text-sidebar-foreground/30 hover:text-destructive hover:bg-destructive/10"
-                                                    title="Delete conversation"
                                                     onClick={(e) => {
-                                                        e.stopPropagation()
-                                                        setDeleteTarget(conv)
+                                                        e.preventDefault();
+                                                        onSelectConv(conv.id);
                                                     }}
+                                                    title={`${conv.title}\n${conv.stepCount} steps · ${conv.status || 'idle'}${conv.archived ? ' (archived)' : ''}`}
+                                                    className={cn("text-xs peer pr-8 flex items-center min-w-0 flex-1", conv.archived && "opacity-50")}
                                                 >
-                                                    <Trash2 />
-                                                </SidebarMenuAction>
+                                                    <ConvStatusDot status={conv.status} pinned={conv.pinned} />
+                                                    <span className="truncate min-w-0 flex-1">{conv.title}</span>
+                                                </SidebarMenuSubButton>
+                                                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover/conv:opacity-100 transition-opacity">
+                                                    <DropdownMenu>
+                                                        <DropdownMenuTrigger asChild>
+                                                            <Button variant="ghost" size="icon" className="h-6 w-6 p-0 text-sidebar-foreground/50 hover:text-sidebar-foreground">
+                                                                <MoreHorizontal className="h-3.5 w-3.5" />
+                                                            </Button>
+                                                        </DropdownMenuTrigger>
+                                                        <DropdownMenuContent align="end" className="text-xs">
+                                                            <DropdownMenuItem onClick={(e) => handleTogglePin(e, conv)}>
+                                                                <Pin className="h-3.5 w-3.5 mr-2 text-amber-500" />
+                                                                {conv.pinned ? "Unpin conversation" : "Pin conversation"}
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuItem onClick={(e) => handleToggleArchive(e, conv)}>
+                                                                {conv.archived ? <ArchiveRestore className="h-3.5 w-3.5 mr-2" /> : <Archive className="h-3.5 w-3.5 mr-2" />}
+                                                                {conv.archived ? "Unarchive conversation" : "Archive conversation"}
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuSeparator />
+                                                            <DropdownMenuItem onClick={() => setDeleteTarget(conv)} className="text-destructive focus:text-destructive">
+                                                                <Trash2 className="h-3.5 w-3.5 mr-2" />
+                                                                Delete conversation
+                                                            </DropdownMenuItem>
+                                                        </DropdownMenuContent>
+                                                    </DropdownMenu>
+                                                </div>
                                             </SidebarMenuSubItem>
                                         ))}
                                         {hasMore && (

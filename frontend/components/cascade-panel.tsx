@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { cascadeSend, cascadeSubmit, getWorkspaces, getModels } from '@/lib/cascade-api';
+import { cascadeSend, cascadeSubmit, getWorkspaces, getModels, getModelQuotaDetails } from '@/lib/cascade-api';
 import type { Workspace, CascadeModel, CascadeModelGroup } from '@/lib/cascade-api';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -314,13 +314,26 @@ export function CascadePanel({ currentConvId, currentWorkspace, wsVersion, onCas
                                                         {m.supportsImages && <ImageIcon className="h-2.5 w-2.5 text-muted-foreground/50 shrink-0" />}
                                                     </div>
                                                     <div className="flex items-center gap-1.5 mt-0.5">
-                                                        <div className="h-1 flex-1 rounded-full bg-muted overflow-hidden">
-                                                            <div
-                                                                className={cn('h-full rounded-full transition-all', m.quota > 0.5 ? 'bg-emerald-400' : m.quota > 0.2 ? 'bg-amber-400' : 'bg-red-400')}
-                                                                style={{ width: `${Math.round(m.quota * 100)}%` }}
-                                                            />
-                                                        </div>
-                                                        <span className="text-[9px] text-muted-foreground/50 w-7 text-right">{Math.round(m.quota * 100)}%</span>
+                                                        {(() => {
+                                                            const q = getModelQuotaDetails(m);
+                                                            return (
+                                                                <>
+                                                                    <span className={cn(
+                                                                        "text-[7px] font-mono px-0.5 py-0 rounded border leading-none font-semibold",
+                                                                        q.windowType === '4h' ? "bg-sky-500/10 text-sky-400 border-sky-500/30" : "bg-purple-500/10 text-purple-400 border-purple-500/30"
+                                                                    )}>
+                                                                        {q.windowType}
+                                                                    </span>
+                                                                    <div className="h-1 flex-1 rounded-full bg-muted overflow-hidden">
+                                                                        <div
+                                                                            className={cn('h-full rounded-full transition-all', q.remainingPct > 50 ? 'bg-emerald-400' : q.remainingPct > 20 ? 'bg-amber-400' : 'bg-red-400')}
+                                                                            style={{ width: `${q.remainingPct}%` }}
+                                                                        />
+                                                                    </div>
+                                                                    <span className="text-[9px] text-muted-foreground/60 font-mono w-7 text-right">{q.remainingPct}%</span>
+                                                                </>
+                                                            );
+                                                        })()}
                                                     </div>
                                                 </div>
                                             </button>

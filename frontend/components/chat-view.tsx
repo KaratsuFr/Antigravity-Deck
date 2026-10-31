@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Step } from '@/lib/types';
 import { extractStepContent, getStepConfig } from '@/lib/step-utils';
-import { cascadeSend, cascadeSubmit, cascadeCancel, cascadeInteract, getWorkspaces, getModels, getAutoAcceptState, setAutoAcceptState, saveMedia, clearConversationCache, fetchWorkflows } from '@/lib/cascade-api';
+import { cascadeSend, cascadeSubmit, cascadeCancel, cascadeInteract, getWorkspaces, getModels, getAutoAcceptState, setAutoAcceptState, saveMedia, clearConversationCache, fetchWorkflows, getModelQuotaDetails } from '@/lib/cascade-api';
 import type { Workspace, CascadeModel, CascadeModelGroup, MediaItem, WorkflowItem } from '@/lib/cascade-api';
 import { API_BASE } from '@/lib/config';
 import { authHeaders } from '@/lib/auth';
@@ -562,7 +562,9 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
     const isActive = isRunning || isWaiting;
 
     const selectedWsName = selectedWs !== null && workspaces[selectedWs] ? workspaces[selectedWs].workspaceName : 'No workspace';
-    const selectedModelLabel = models.find(m => m.modelId === selectedModel)?.label || 'Default';
+    const selectedModelObj = models.find(m => m.modelId === selectedModel);
+    const selectedModelLabel = selectedModelObj?.label || 'Default';
+    const selectedModelQuota = selectedModelObj ? getModelQuotaDetails(selectedModelObj) : null;
     // Render grouped exactly like the IDE picker; fall back to a single flat section.
     const modelDisplayGroups: CascadeModelGroup[] = modelGroups.length ? modelGroups : (models.length ? [{ name: '', models }] : []);
 
@@ -717,39 +719,70 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                         <DropdownMenuTrigger asChild>
                                             <Button variant="ghost" size="sm" className="gap-1 sm:gap-1.5 text-muted-foreground h-7 px-1.5 sm:px-2 font-normal shrink min-w-0 max-w-full">
                                                 <span><Brain className="h-3.5 w-3.5 shrink-0" /></span>
-                                                <span className="truncate max-w-[140px] xs:max-w-[180px] sm:max-w-[240px]" title={selectedModelLabel}>
+                                                <span className="truncate max-w-[110px] xs:max-w-[150px] sm:max-w-[210px]" title={selectedModelLabel}>
                                                     {formatThinkingLevel(selectedModelLabel)}
                                                 </span>
+                                                {selectedModelQuota && (
+                                                    <span className={cn(
+                                                        "text-[9px] font-mono px-1 py-0.5 rounded border leading-none shrink-0 font-medium",
+                                                        selectedModelQuota.windowType === '4h'
+                                                            ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
+                                                            : "bg-purple-500/10 text-purple-400 border-purple-500/30"
+                                                    )} title={`Quota ${selectedModelQuota.windowType}: ${selectedModelQuota.remainingPct}% restant (${selectedModelQuota.consumedPct}% consommé)`}>
+                                                        {selectedModelQuota.windowType} {selectedModelQuota.remainingPct}%
+                                                     </span>
+                                                )}
                                                 <ChevronDown className="h-3 w-3 opacity-50 shrink-0" />
                                             </Button>
                                         </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="start" className="w-72">
+                                        <DropdownMenuContent align="start" className="w-80 max-w-[94vw]">
                                             {modelDisplayGroups.map((group, gi) => (
                                                 <DropdownMenuGroup key={group.name || `g${gi}`}>
                                                     {/* IDE shows a flat list when there's a single group; only label real sub-groups. */}
                                                     {modelDisplayGroups.length > 1 && group.name && (
                                                         <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground/70 py-1">{group.name}</DropdownMenuLabel>
                                                     )}
-                                                    {group.models.map(m => (
-                                                        <DropdownMenuItem
-                                                            key={m.modelId || m.label}
-                                                            onClick={() => setSelectedModel(m.modelId)}
-                                                            className={cn('cursor-pointer flex items-center justify-between gap-2',
-                                                                m.modelId === selectedModel && 'text-primary')}
-                                                        >
-                                                            <div className="flex items-center gap-2 min-w-0">
-                                                                <span className="truncate">{formatThinkingLevel(m.label)}</span>
-                                                                {m.tagTitle && <Badge variant="secondary" className="text-[9px] h-3.5 px-1 shrink-0" title={m.tagDescription || undefined}>{m.tagTitle}</Badge>}
-                                                                {m.isRecommended && <Badge variant="secondary" className="text-[9px] h-3.5 px-1 shrink-0"><Star className="w-2.5 h-2.5 text-amber-400" /></Badge>}
-                                                            </div>
-                                                            <div className="flex items-center gap-1.5 shrink-0">
-                                                                {m.supportsImages && <span className="text-[9px]"><ImageIcon className="h-3 w-3" /></span>}
-                                                                <div className="w-12 h-1.5 rounded-full bg-muted overflow-hidden">
-                                                                    <div className="h-full rounded-full bg-emerald-500/70" style={{ width: `${Math.round(m.quota * 100)}%` }} />
+                                                    {group.models.map(m => {
+                                                        const q = getModelQuotaDetails(m);
+                                                        return (
+                                                            <DropdownMenuItem
+                                                                key={m.modelId || m.label}
+                                                                onClick={() => setSelectedModel(m.modelId)}
+                                                                title={`${formatThinkingLevel(m.label)}\nFenêtre: ${q.windowType}${q.countdown ? ` (reset dans ${q.countdown})` : ''}\nRestant: ${q.remainingPct}%\nConsommé: ${q.consumedPct}%`}
+                                                                className={cn('cursor-pointer flex items-center justify-between gap-2 py-1.5',
+                                                                    m.modelId === selectedModel && 'text-primary font-medium bg-accent/40')}
+                                                            >
+                                                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                                                    <span className="truncate text-xs">{formatThinkingLevel(m.label)}</span>
+                                                                    {m.tagTitle && <Badge variant="secondary" className="text-[9px] h-3.5 px-1 shrink-0" title={m.tagDescription || undefined}>{m.tagTitle}</Badge>}
+                                                                    {m.isRecommended && <Badge variant="secondary" className="text-[9px] h-3.5 px-1 shrink-0"><Star className="w-2.5 h-2.5 text-amber-400" /></Badge>}
                                                                 </div>
-                                                            </div>
-                                                        </DropdownMenuItem>
-                                                    ))}
+                                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                                    {m.supportsImages && <span className="text-[9px]"><ImageIcon className="h-3 w-3 text-muted-foreground/50" /></span>}
+                                                                    <span className={cn(
+                                                                        "text-[8px] font-mono px-1 py-0.5 rounded border leading-none font-semibold",
+                                                                        q.windowType === '4h'
+                                                                            ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
+                                                                            : "bg-purple-500/10 text-purple-400 border-purple-500/30"
+                                                                    )}>
+                                                                        {q.windowType}
+                                                                    </span>
+                                                                    <div className="w-10 h-1.5 rounded-full bg-muted overflow-hidden">
+                                                                        <div
+                                                                            className={cn(
+                                                                                "h-full rounded-full transition-all",
+                                                                                q.remainingPct > 50 ? "bg-emerald-500/80" : q.remainingPct > 20 ? "bg-amber-500/80" : "bg-destructive/80"
+                                                                            )}
+                                                                            style={{ width: `${q.remainingPct}%` }}
+                                                                        />
+                                                                    </div>
+                                                                    <span className="text-[10px] font-mono tabular-nums text-muted-foreground w-7 text-right">
+                                                                        {q.remainingPct}%
+                                                                    </span>
+                                                                </div>
+                                                            </DropdownMenuItem>
+                                                        );
+                                                    })}
                                                     {gi < modelDisplayGroups.length - 1 && <DropdownMenuSeparator />}
                                                 </DropdownMenuGroup>
                                             ))}

@@ -65,6 +65,65 @@ export interface CascadeModel {
     resetTime?: string | null;
 }
 
+export interface ModelQuotaDetails {
+    remainingPct: number;
+    consumedPct: number;
+    windowType: '4h' | 'Hebdo' | '24h';
+    countdown: string;
+    resetDateStr: string;
+}
+
+export function getModelQuotaDetails(m: CascadeModel): ModelQuotaDetails {
+    const quotaVal = typeof m.quota === 'number' && !isNaN(m.quota) ? m.quota : 1;
+    const remainingPct = Math.round(quotaVal * 100);
+    const consumedPct = Math.max(0, 100 - remainingPct);
+
+    let windowType: '4h' | 'Hebdo' | '24h' = 'Hebdo';
+    let countdown = '';
+    let resetDateStr = '';
+
+    if (m.resetTime) {
+        const t = new Date(m.resetTime).getTime();
+        if (!isNaN(t)) {
+            resetDateStr = new Date(m.resetTime).toLocaleString('fr-FR', {
+                weekday: 'short',
+                hour: '2-digit',
+                minute: '2-digit',
+            });
+            const diffMs = t - Date.now();
+            const hours = diffMs / 3600000;
+            if (hours <= 6) {
+                windowType = '4h';
+                const mRemaining = Math.max(0, Math.floor((diffMs % 3600000) / 60000));
+                const hRemaining = Math.max(0, Math.floor(hours));
+                countdown = hRemaining > 0 ? `${hRemaining}h${mRemaining > 0 ? `${mRemaining}m` : ''}` : `${mRemaining}m`;
+            } else if (hours <= 26) {
+                windowType = '24h';
+                countdown = `${Math.round(hours)}h`;
+            } else {
+                windowType = 'Hebdo';
+                const days = Math.floor(hours / 24);
+                const h = Math.floor(hours % 24);
+                countdown = days > 0 ? `${days}j${h > 0 ? `${h}h` : ''}` : `${h}h`;
+            }
+        }
+    } else {
+        if (m.label.toLowerCase().includes('flash')) {
+            windowType = '4h';
+        } else {
+            windowType = 'Hebdo';
+        }
+    }
+
+    return {
+        remainingPct,
+        consumedPct,
+        windowType,
+        countdown,
+        resetDateStr,
+    };
+}
+
 // A display section mirroring the Antigravity IDE model picker (from clientModelSorts).
 // `name` is the section header (e.g. "Recommended"); empty string means render no header.
 export interface CascadeModelGroup {

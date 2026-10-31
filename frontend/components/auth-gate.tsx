@@ -32,7 +32,15 @@ export function AuthGate({ children }: AuthGateProps) {
             setAuthKey(urlKey.trim());
         }
 
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        const host = window.location.hostname;
+        if (
+            host === 'localhost' ||
+            host === '127.0.0.1' ||
+            host.endsWith('.lan') ||
+            host.endsWith('.local') ||
+            /^192\.168\./.test(host) ||
+            /^10\./.test(host)
+        ) {
             setAuthenticated(true);
             return;
         }

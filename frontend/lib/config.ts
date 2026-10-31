@@ -53,8 +53,8 @@ async function _resolveWsUrl(): Promise<string> {
     } else {
         const tunnel = process.env.NEXT_PUBLIC_BACKEND_URL || '';
         return tunnel
-            ? tunnel.replace(/^http/, 'ws')
-            : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+            ? (tunnel.replace(/^http/, 'ws').replace(/\/+$/, '') + '/ws')
+            : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
     }
 }
 

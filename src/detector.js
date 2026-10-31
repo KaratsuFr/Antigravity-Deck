@@ -197,10 +197,10 @@ async function findApiPort(ports, csrfToken) {
     const endpoint = '/exa.language_server_pb.LanguageServerService/GetUserStatus';
 
     const probes = [
-        { label: 'HTTPS/IPv4',    url: (p) => `https://127.0.0.1:${p}${endpoint}`,  tls: true },
         { label: 'HTTP/localhost', url: (p) => `http://localhost:${p}${endpoint}`,    tls: false },
-        { label: 'HTTPS/IPv6',    url: (p) => `https://[::1]:${p}${endpoint}`,       tls: true },
+        { label: 'HTTPS/IPv4',    url: (p) => `https://127.0.0.1:${p}${endpoint}`,  tls: true },
         { label: 'HTTP/IPv6',     url: (p) => `http://[::1]:${p}${endpoint}`,        tls: false },
+        { label: 'HTTPS/IPv6',    url: (p) => `https://[::1]:${p}${endpoint}`,       tls: true },
     ];
 
     for (const port of ports) {
@@ -265,7 +265,7 @@ async function getTrackedWorkspaceUris(hub) {
         const host = hub.useTls ? '127.0.0.1' : 'localhost';
         const headers = { 'Content-Type': 'application/json', 'Connect-Protocol-Version': '1', 'X-Codeium-Csrf-Token': hub.csrfToken };
         const url = `${protocol}://${host}:${hub.port}/exa.language_server_pb.LanguageServerService/GetWorkspaceInfos`;
-        const res = await connectPost(url, headers, '{}', 5000);
+        const res = await connectPost(url, headers, '{}', 8000);
         if (!res.ok) return [];
         const data = await res.json();
         return (data.workspaceInfos || []).map(w => w.workspaceUri).filter(Boolean);
@@ -276,6 +276,37 @@ async function getTrackedWorkspaceUris(hub) {
 
 // Locate the hub process among detected LS processes and resolve its API port.
 async function locateHub() {
+    const hubFile = path.join(__dirname, '..', 'hub.json');
+    if (fs.existsSync(hubFile)) {
+        try {
+            const data = JSON.parse(fs.readFileSync(hubFile, 'utf8'));
+            if (data.port && data.csrfToken) {
+                const result = await findApiPort([parseInt(data.port, 10)], data.csrfToken);
+                if (result) {
+                    return { pid: process.pid, csrfToken: data.csrfToken, port: result.port, useTls: result.useTls };
+                }
+            }
+        } catch (e) {
+            console.error('[!] Failed reading hub.json:', e.message);
+        }
+    }
+
+    // Attempt automated discovery of agy hub on Linux
+    const discoverScript = path.join(__dirname, '..', 'scripts', 'discover-hub.py');
+    if (fs.existsSync(discoverScript)) {
+        try {
+            const { execSync } = require('child_process');
+            const out = execSync(`python3 "${discoverScript}"`, { timeout: 15000, encoding: 'utf8' }).trim();
+            const data = JSON.parse(out);
+            if (data.port && data.csrfToken) {
+                const result = await findApiPort([parseInt(data.port, 10)], data.csrfToken);
+                if (result) {
+                    return { pid: process.pid, csrfToken: data.csrfToken, port: result.port, useTls: result.useTls };
+                }
+            }
+        } catch { }
+    }
+
     const procs = await detectLanguageServers();
     for (const proc of procs) {
         const ports = await detectPorts(proc.pid);
@@ -291,6 +322,10 @@ async function locateHub() {
 // Rebuild lsInstances (virtual workspaces) from a list of tracked workspace URIs.
 // Preserves the previously-active workspace by name when possible.
 function rebuildInstances(hub, uris) {
+    if (uris.length === 0 && lsInstances.length > 0) {
+        // Hub is still active but returned 0 workspaces transiently (e.g. busy/timeout). Keep existing instances.
+        return;
+    }
     const prevActiveName = (lsInstances.find(i => i.active) || {}).workspaceName;
     // Dedup URIs case-insensitively (hub may report duplicates)
     const seen = new Set();

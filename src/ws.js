@@ -8,8 +8,25 @@ const viewers = new Set();
 const globalViewers = new Set(); // clients that want ALL events (Live Logs)
 const clientConvMap = new Map(); // Map<ws, convId> — per-client conversation tracking
 
+let heartbeatInterval = null;
+
 function setupWebSocket(wss, { ensureCached, stepCache }) {
+    if (!heartbeatInterval) {
+        heartbeatInterval = setInterval(() => {
+            viewers.forEach(ws => {
+                if (ws.isAlive === false) {
+                    try { ws.terminate(); } catch { }
+                    return;
+                }
+                ws.isAlive = false;
+                try { ws.ping(); } catch { }
+            });
+        }, 20000);
+    }
+
     wss.on('connection', (ws, req) => {
+        ws.isAlive = true;
+        ws.on('pong', () => { ws.isAlive = true; });
         // Auth check for WebSocket (skip for localhost connections — same policy as HTTP)
         const authKey = process.env.AUTH_KEY || '';
         if (authKey) {

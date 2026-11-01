@@ -245,6 +245,19 @@ if (AUTH_KEY) {
 
 // Routes & WebSocket
 setupRoutes(app);
+
+// Monolith: Serve compiled Next.js static export directly if present
+const staticDir = path.join(__dirname, 'frontend', 'out');
+if (fs.existsSync(staticDir)) {
+  console.log(`  📦 Monolith Mode: Serving frontend from ${staticDir}`);
+  app.use('/_next', express.static(path.join(staticDir, '_next'), { maxAge: '30d', immutable: true }));
+  app.use(express.static(staticDir));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/ws')) return next();
+    res.sendFile(path.join(staticDir, 'index.html'));
+  });
+}
+
 setupWebSocket(wss);
 
 // Agent WebSocket — external AI agent protocol at /ws/agent

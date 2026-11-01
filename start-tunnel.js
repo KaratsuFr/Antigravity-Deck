@@ -92,11 +92,11 @@ function killStaleProcesses(ports) {
 
 // Build frontend (production)
 function buildFrontend(extraEnv = {}) {
-    const buildEnv = { ...process.env, BACKEND_PORT: String(BE_PORT), ...extraEnv };
+    const buildEnv = { ...process.env, NEXT_EXPORT: 'true', NODE_ENV: 'production', ...extraEnv };
     progress('Building frontend...');
-    log('*', 'Building frontend (production)...');
+    log('*', 'Building frontend (production static export)...');
     try {
-        execSync('npx next build', {
+        execSync('npm run build', {
             cwd: path.join(__dirname, 'frontend'),
             env: buildEnv,
             stdio: QUIET ? 'ignore' : 'inherit'
@@ -140,65 +140,39 @@ process.on('SIGINT', cleanup);
 process.on('SIGTERM', cleanup);
 
 // ============================================================
-// LOCAL MODE: build → start backend → start frontend
+// LOCAL MODE: build static export → start unified monolith server
 // ============================================================
 async function runLocal() {
-    console.log('\n\x1b[1m  🚀 Antigravity Deck — Starting (production)\x1b[0m\n');
+    console.log('\n\x1b[1m  🚀 Antigravity Deck — Starting (Monolith Production)\x1b[0m\n');
 
     // Kill stale processes
     killStaleProcesses([BE_PORT, FE_PORT]);
 
-    // Build if needed — detect stale builds from dev mode or different port
-    const nextDir = path.join(__dirname, 'frontend', '.next');
-    const portFile = path.join(nextDir, '.backend-port');
-    let needBuild = FORCE_BUILD || !fs.existsSync(nextDir);
-    if (!needBuild) {
-        // Check if the build was done with the correct backend port
-        try {
-            const builtPort = fs.readFileSync(portFile, 'utf8').trim();
-            if (builtPort !== String(BE_PORT)) {
-                log('*', `⚠️  Build was for port ${builtPort}, need port ${BE_PORT} — rebuilding...`);
-                needBuild = true;
-            }
-        } catch {
-            // No port file = dev mode build or old build — rebuild
-            log('*', '⚠️  No build port marker found — rebuilding...');
-            needBuild = true;
-        }
-    }
+    // Build if needed — check if static output exists
+    const outDir = path.join(__dirname, 'frontend', 'out');
+    const indexHtml = path.join(outDir, 'index.html');
+    let needBuild = FORCE_BUILD || !fs.existsSync(indexHtml);
     if (needBuild) {
         buildFrontend();
-        // Save the port this build was made for
-        try { fs.writeFileSync(portFile, String(BE_PORT)); } catch { }
     } else {
         log('*', '✅ Frontend already built (use --build to force rebuild)');
     }
 
-    // Start backend
-    progress('Starting backend...');
-    log('*', `Starting backend on port ${BE_PORT}...`);
-    const be = startProcess('BE', 'node', ['server.js'], {
+    // Start monolithic server on FE_PORT (9808) — serves both API and static UI
+    progress('Starting monolithic server...');
+    log('*', `Starting unified server on port ${FE_PORT}...`);
+    const srv = startProcess('SRV', 'node', ['server.js'], {
         cwd: __dirname,
-        env: { ...process.env, PORT: String(BE_PORT), NODE_ENV: 'production' }
-    });
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // Start frontend
-    progress('Starting frontend...');
-    log('*', `Starting frontend on port ${FE_PORT}...`);
-    const fe = startProcess('FE', 'npx', ['next', 'start', '--port', String(FE_PORT)], {
-        cwd: path.join(__dirname, 'frontend'),
-        env: { ...process.env, BACKEND_PORT: String(BE_PORT), NODE_ENV: 'production' }
+        env: { ...process.env, PORT: String(FE_PORT), NODE_ENV: 'production' }
     });
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     if (QUIET) process.stdout.write('\r\x1b[K');
 
     console.log('\n' + '='.repeat(60));
-    console.log('\x1b[1m\x1b[32m  ✅ READY!\x1b[0m');
+    console.log('\x1b[1m\x1b[32m  ✅ READY! (Monolith Mode)\x1b[0m');
     console.log('='.repeat(60));
-    console.log(`  Backend:  http://localhost:${BE_PORT}`);
-    console.log(`  Frontend: http://localhost:${FE_PORT}`);
+    console.log(`  Unified URL: http://localhost:${FE_PORT}`);
     console.log('='.repeat(60));
     console.log('\n  Press Ctrl+C to stop\n');
 }

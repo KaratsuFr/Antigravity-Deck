@@ -33,6 +33,7 @@ import {
     SidebarMenu,
     SidebarMenuButton,
     SidebarMenuItem,
+    SidebarRail,
     SidebarSeparator,
     useSidebar,
 } from "@/components/ui/sidebar"
@@ -1001,6 +1002,7 @@ export function AppSidebar({
                         </SidebarMenuItem>
                     </SidebarMenu>
                 </SidebarFooter>
+                <SidebarRail />
             </Sidebar>
 
             <Dialog open={showCreateDialog} onOpenChange={(open) => {

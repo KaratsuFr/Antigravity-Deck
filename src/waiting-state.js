@@ -16,6 +16,7 @@ function setCascadeWaiting(cascadeId, isWaiting) {
         waitingCascades.add(cascadeId);
     } else {
         waitingCascades.delete(cascadeId);
+        try { require('./push-service').cancelDelayedPush(cascadeId); } catch {}
     }
 
     if (prev !== isWaiting) {

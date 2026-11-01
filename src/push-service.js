@@ -230,6 +230,60 @@ function convLabel(convId, convInfo) {
     return convId.substring(0, 8);
 }
 
+// --- Delayed Push Management (5s grace period) ---
+// Suppresses push notifications if the user views/interacts with the conversation in an active browser within 5 seconds.
+const pendingPushes = new Map(); // convId -> { timer, payload, scheduledAt }
+
+function cancelDelayedPush(convId) {
+    if (!convId) return;
+    const pending = pendingPushes.get(convId);
+    if (pending) {
+        clearTimeout(pending.timer);
+        pendingPushes.delete(convId);
+        console.log(`[Push] Cancelled pending push for ${convId.substring(0, 8)} (active view or resolved)`);
+    }
+}
+
+function scheduleDelayedPush(convId, payload, delayMs = 5000) {
+    if (!convId) return;
+
+    // Fast-path: if already actively viewed in an open browser right now, suppress immediately
+    const { isConversationActivelyViewed } = require('./ws');
+    if (isConversationActivelyViewed(convId)) {
+        console.log(`[Push] Suppressed push for ${convId.substring(0, 8)} (actively viewed right now)`);
+        return;
+    }
+
+    // Debounce / replace existing timer for this conversation
+    if (pendingPushes.has(convId)) {
+        clearTimeout(pendingPushes.get(convId).timer);
+    }
+
+    const timer = setTimeout(() => {
+        pendingPushes.delete(convId);
+        // Verify again after 5s: was the stream/conversation viewed in an active browser?
+        if (isConversationActivelyViewed(convId)) {
+            console.log(`[Push] Suppressed push for ${convId.substring(0, 8)} (viewed within 5s grace period)`);
+            return;
+        }
+
+        // Check if cascade is still waiting
+        try {
+            const { isCascadeWaiting } = require('./waiting-state');
+            if (!isCascadeWaiting(convId)) {
+                console.log(`[Push] Dropped push for ${convId.substring(0, 8)} (no longer waiting)`);
+                return;
+            }
+        } catch {}
+
+        console.log(`[Push] 5s grace period expired without active view, sending push for ${convId.substring(0, 8)}`);
+        sendPushToAll(payload);
+    }, delayMs);
+
+    pendingPushes.set(convId, { timer, payload, scheduledAt: Date.now() });
+    console.log(`[Push] Scheduled push for ${convId.substring(0, 8)} in ${delayMs / 1000}s (grace period)`);
+}
+
 // handleCascadeStatusPush — convInfo is the trajectorySummary object ({ summary, stepCount, status, ... })
 function handleCascadeStatusPush(convId, prevStatus, newStatus, convInfo) {
     const label = convLabel(convId, convInfo);
@@ -255,17 +309,12 @@ function handleCascadeStatusPush(convId, prevStatus, newStatus, convInfo) {
     // Waiting for user
     if (newStatus === 'CASCADE_RUN_STATUS_WAITING_FOR_USER' && prevStatus !== 'CASCADE_RUN_STATUS_WAITING_FOR_USER') {
         if (!isEventEnabled('waitingForUser')) return;
-        const { isConversationActivelyViewed } = require('./ws');
-        if (isConversationActivelyViewed(convId)) {
-            console.log(`[Push] Suppressed waiting push for ${convId.substring(0, 8)} (app is actively viewed)`);
-            return;
-        }
-        sendPushToAll({
+        scheduleDelayedPush(convId, {
             title: `⏳ ${label} — Action Required`,
             body: lastContent || 'Waiting for your approval.',
             tag: `waiting-${convId.substring(0, 8)}`,
             data: { url: '/', convId },
-        });
+        }, 5000);
         return;
     }
 
@@ -285,11 +334,6 @@ function handleCascadeStatusPush(convId, prevStatus, newStatus, convInfo) {
 // Called when a step is in WAITING state and requires manual user approval/interaction
 function handleWaitingStepPush(convId, stepInfo, convInfo) {
     if (!isEventEnabled('waitingForUser')) return;
-    const { isConversationActivelyViewed } = require('./ws');
-    if (isConversationActivelyViewed(convId)) {
-        console.log(`[Push] Suppressed waiting push for ${convId.substring(0, 8)} (app is actively viewed)`);
-        return;
-    }
     const label = convLabel(convId, convInfo);
     let body = 'Waiting for your approval.';
 
@@ -317,12 +361,12 @@ function handleWaitingStepPush(convId, stepInfo, convInfo) {
         if (last) body = last;
     }
 
-    sendPushToAll({
+    scheduleDelayedPush(convId, {
         title: `⏳ ${label} — Action Required`,
         body,
         tag: `waiting-${convId.substring(0, 8)}`,
         data: { url: '/', convId },
-    });
+    }, 5000);
 }
 
 // Called from auto-accept.js when a step is auto-accepted
@@ -347,4 +391,6 @@ module.exports = {
     handleCascadeStatusPush,
     handleWaitingStepPush,
     handleAutoAcceptedPush,
+    cancelDelayedPush,
+    scheduleDelayedPush,
 };

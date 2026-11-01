@@ -53,6 +53,7 @@ function setupWebSocket(wss, { ensureCached, stepCache }) {
                 const msg = JSON.parse(raw.toString());
                 if (msg.type === 'set_conversation') {
                     clientConvMap.set(ws, msg.conversationId);
+                    try { require('./push-service').cancelDelayedPush(msg.conversationId); } catch {}
                     console.log(`[WS] set_conversation → ${msg.conversationId?.substring(0, 8)}, clients: ${clientConvMap.size}`);
                     await ensureCached(msg.conversationId, getInstanceForCascade(msg.conversationId));
                     const cache = stepCache[msg.conversationId];
@@ -70,6 +71,12 @@ function setupWebSocket(wss, { ensureCached, stepCache }) {
                 } else if (msg.type === 'client_visibility') {
                     // Visibility update from frontend (document.visibilityState)
                     clientVisibilityMap.set(ws, !!msg.visible);
+                    if (msg.visible) {
+                        const cur = clientConvMap.get(ws);
+                        if (cur) {
+                            try { require('./push-service').cancelDelayedPush(cur); } catch {}
+                        }
+                    }
                 } else if (msg.type === 'app_log') {
                     // Frontend error/log forwarding — rebroadcast to all Live Logs viewers
                     broadcastToGlobal({ ...msg, ts: msg.ts || Date.now() });

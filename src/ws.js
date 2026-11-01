@@ -7,6 +7,7 @@ const { getInstanceForCascade } = require('./poller');
 const viewers = new Set();
 const globalViewers = new Set(); // clients that want ALL events (Live Logs)
 const clientConvMap = new Map(); // Map<ws, convId> — per-client conversation tracking
+const clientVisibilityMap = new Map(); // Map<ws, boolean> — true if window is visible & active
 
 let heartbeatInterval = null;
 
@@ -66,6 +67,9 @@ function setupWebSocket(wss, { ensureCached, stepCache }) {
                     // Live Logs mode: receive all broadcasts regardless of conversation
                     globalViewers.add(ws);
                     console.log(`[WS] subscribe_all — global viewers: ${globalViewers.size}`);
+                } else if (msg.type === 'client_visibility') {
+                    // Visibility update from frontend (document.visibilityState)
+                    clientVisibilityMap.set(ws, !!msg.visible);
                 } else if (msg.type === 'app_log') {
                     // Frontend error/log forwarding — rebroadcast to all Live Logs viewers
                     broadcastToGlobal({ ...msg, ts: msg.ts || Date.now() });
@@ -77,6 +81,7 @@ function setupWebSocket(wss, { ensureCached, stepCache }) {
             viewers.delete(ws);
             globalViewers.delete(ws);
             clientConvMap.delete(ws);
+            clientVisibilityMap.delete(ws);
         });
     });
 }
@@ -120,4 +125,20 @@ function broadcastToGlobal(data) {
     });
 }
 
-module.exports = { setupWebSocket, sendToOne, broadcast, broadcastAll, broadcastToGlobal };
+/**
+ * Checks if any client currently has the specified conversation actively open and visible.
+ * Used by push-service to avoid sending push notifications if the user is already actively
+ * viewing the conversation on their screen.
+ */
+function isConversationActivelyViewed(convId) {
+    for (const ws of viewers) {
+        if (ws.readyState === 1 && clientVisibilityMap.get(ws) !== false) {
+            if (!convId || clientConvMap.get(ws) === convId) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+module.exports = { setupWebSocket, sendToOne, broadcast, broadcastAll, broadcastToGlobal, isConversationActivelyViewed };

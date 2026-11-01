@@ -161,6 +161,9 @@ export function useWebSocket() {
             if (convId) {
                 wsService!.send({ type: 'set_conversation', conversationId: convId });
             }
+            // Send initial visibility state so server knows if user is actively watching
+            const isVisible = typeof document !== 'undefined' && document.visibilityState === 'visible';
+            wsService!.send({ type: 'client_visibility', visible: isVisible });
             // Fetch initial resource data immediately (don't wait for first 5s broadcast)
             getWorkspaceResources()
                 .then(data => setState(prev => ({ ...prev, workspaceResources: data })))
@@ -402,7 +405,27 @@ export function useWebSocket() {
             setState(prev => ({ ...prev, workspaceResources: (data.data as ResourceSnapshot) || {} as ResourceSnapshot }));
         });
 
+        // Track visibility to notify backend (suppresses push notifications when app is active)
+        const updateVisibility = () => {
+            const isVis = typeof document !== 'undefined' && document.visibilityState === 'visible' && (document.hasFocus ? document.hasFocus() : true);
+            wsService?.send({ type: 'client_visibility', visible: isVis });
+        };
+        const onVisChange = () => {
+            const isVis = typeof document !== 'undefined' && document.visibilityState === 'visible';
+            wsService?.send({ type: 'client_visibility', visible: isVis });
+        };
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', onVisChange);
+            window.addEventListener('focus', updateVisibility);
+            window.addEventListener('blur', updateVisibility);
+        }
+
         return () => {
+            if (typeof document !== 'undefined') {
+                document.removeEventListener('visibilitychange', onVisChange);
+                window.removeEventListener('focus', updateVisibility);
+                window.removeEventListener('blur', updateVisibility);
+            }
             offOpen();
             offClose();
             offStatus();

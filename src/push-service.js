@@ -238,6 +238,11 @@ function handleCascadeStatusPush(convId, prevStatus, newStatus, convInfo) {
     // Cascade complete: ACTIVE → DONE/IDLE
     if (ACTIVE_STATUSES.includes(prevStatus) && COMPLETE_STATUSES.includes(newStatus)) {
         if (!isEventEnabled('cascadeComplete')) return;
+        const { isConversationActivelyViewed } = require('./ws');
+        if (isConversationActivelyViewed(convId)) {
+            console.log(`[Push] Suppressed complete push for ${convId.substring(0, 8)} (app is actively viewed)`);
+            return;
+        }
         sendPushToAll({
             title: `✅ ${label}`,
             body: lastContent || 'Cascade has finished running.',
@@ -250,6 +255,11 @@ function handleCascadeStatusPush(convId, prevStatus, newStatus, convInfo) {
     // Waiting for user
     if (newStatus === 'CASCADE_RUN_STATUS_WAITING_FOR_USER' && prevStatus !== 'CASCADE_RUN_STATUS_WAITING_FOR_USER') {
         if (!isEventEnabled('waitingForUser')) return;
+        const { isConversationActivelyViewed } = require('./ws');
+        if (isConversationActivelyViewed(convId)) {
+            console.log(`[Push] Suppressed waiting push for ${convId.substring(0, 8)} (app is actively viewed)`);
+            return;
+        }
         sendPushToAll({
             title: `⏳ ${label} — Action Required`,
             body: lastContent || 'Waiting for your approval.',
@@ -275,6 +285,11 @@ function handleCascadeStatusPush(convId, prevStatus, newStatus, convInfo) {
 // Called when a step is in WAITING state and requires manual user approval/interaction
 function handleWaitingStepPush(convId, stepInfo, convInfo) {
     if (!isEventEnabled('waitingForUser')) return;
+    const { isConversationActivelyViewed } = require('./ws');
+    if (isConversationActivelyViewed(convId)) {
+        console.log(`[Push] Suppressed waiting push for ${convId.substring(0, 8)} (app is actively viewed)`);
+        return;
+    }
     const label = convLabel(convId, convInfo);
     let body = 'Waiting for your approval.';
 

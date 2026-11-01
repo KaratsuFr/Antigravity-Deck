@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Trash2, ChevronRight, FolderGit2, MessageSquare, Plus, Pin, Archive, ArchiveRestore, MoreHorizontal, Brain, AlertCircle, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { API_BASE } from '@/lib/config'
 import { authHeaders } from '@/lib/auth'
@@ -122,6 +122,28 @@ export function ProjectGroup({
     onUpdated,
 }: ProjectGroupProps) {
     const [deleteTarget, setDeleteTarget] = useState<ConvRow | null>(null)
+    const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
+    const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const isLongPressRef = useRef(false)
+
+    const handleTouchStart = (convId: string) => {
+        isLongPressRef.current = false;
+        if (touchTimerRef.current) clearTimeout(touchTimerRef.current);
+        touchTimerRef.current = setTimeout(() => {
+            isLongPressRef.current = true;
+            if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                try { navigator.vibrate(40); } catch {}
+            }
+            setMenuOpenId(convId);
+        }, 450);
+    };
+
+    const handleTouchEnd = () => {
+        if (touchTimerRef.current) {
+            clearTimeout(touchTimerRef.current);
+            touchTimerRef.current = null;
+        }
+    };
 
     const handleTogglePin = async (e: React.MouseEvent, conv: ConvRow) => {
         e.stopPropagation();
@@ -194,11 +216,26 @@ export function ProjectGroup({
                                 ) : (
                                     <>
                                         {visible.map(conv => (
-                                            <SidebarMenuSubItem key={conv.id} className="group/conv relative flex items-center">
+                                            <SidebarMenuSubItem
+                                                key={conv.id}
+                                                className="group/conv relative flex items-center select-none"
+                                                onContextMenu={(e) => {
+                                                    e.preventDefault();
+                                                    setMenuOpenId(conv.id);
+                                                }}
+                                                onTouchStart={() => handleTouchStart(conv.id)}
+                                                onTouchEnd={handleTouchEnd}
+                                                onTouchMove={handleTouchEnd}
+                                                onTouchCancel={handleTouchEnd}
+                                            >
                                                 <SidebarMenuSubButton
                                                     isActive={conv.id === currentConvId}
                                                     onClick={(e) => {
                                                         e.preventDefault();
+                                                        if (isLongPressRef.current) {
+                                                            isLongPressRef.current = false;
+                                                            return;
+                                                        }
                                                         onSelectConv(conv.id);
                                                     }}
                                                     title={`${conv.title}\n${conv.stepCount} steps · ${conv.status || 'idle'}${conv.archived ? ' (archived)' : ''}`}
@@ -208,7 +245,7 @@ export function ProjectGroup({
                                                     <span className="truncate min-w-0 flex-1">{conv.title}</span>
                                                 </SidebarMenuSubButton>
                                                 <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover/conv:opacity-100 transition-opacity">
-                                                    <DropdownMenu>
+                                                    <DropdownMenu open={menuOpenId === conv.id} onOpenChange={(open) => setMenuOpenId(open ? conv.id : null)}>
                                                         <DropdownMenuTrigger asChild>
                                                             <Button variant="ghost" size="icon" className="h-6 w-6 p-0 text-sidebar-foreground/50 hover:text-sidebar-foreground">
                                                                 <MoreHorizontal className="h-3.5 w-3.5" />

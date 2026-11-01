@@ -238,21 +238,18 @@ export default function Home() {
     selectConversation(convId);
   }, [selectConversation, resetPanels]);
 
-  // === New Chat (from ChatView) — show ChatView in new chat mode ===
+  // === New Chat (from ChatView) — show ChatView in new chat mode in current project ===
   const handleNewChat = useCallback(() => {
     selectConversation(null);
     resetPanels();
-    setNewChatWorkspaceUri(null);
     setNewChatMode(true);
   }, [selectConversation, resetPanels]);
 
-  // === New Conversation (top action) — fresh chat against the hub, no project context ===
+  // === New Conversation (top action) — fresh chat scoped to active project if available ===
   const handleNewConversation = useCallback(() => {
     selectConversation(null);
     resetPanels();
-    setActiveWorkspace(null);
     setHistoryProjectId(null);
-    setNewChatWorkspaceUri(null);
     setNewChatMode(true);
   }, [selectConversation, resetPanels]);
 

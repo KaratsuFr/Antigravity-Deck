@@ -49,7 +49,7 @@ module.exports = function setupCascadeRoutes(app) {
     // Start a new cascade and send a message (non-blocking)
     app.post('/api/cascade/submit', async (req, res) => {
         try {
-            const { message, modelId, images, imageBase64, workspaceUri } = req.body;
+            const { message, modelId, images, imageBase64, workspaceUri, workspace } = req.body;
             if (!message) {
                 return res.status(400).json({ error: 'message is required' });
             }
@@ -57,7 +57,11 @@ module.exports = function setupCascadeRoutes(app) {
             // workspaceUri (a project folder file:// URI) binds the new cascade to that
             // project so it appears under it; without it the hub creates a detached convo.
             const inst = resolveInst(req);
-            const startOpts = workspaceUri ? { workspaceUris: [workspaceUri] } : {};
+            let finalUri = workspaceUri;
+            if (!finalUri && inst && inst.workspaceFolderUri && inst.workspaceFolderUri.startsWith('file:')) {
+                finalUri = inst.workspaceFolderUri;
+            }
+            const startOpts = finalUri ? { workspaceUris: [finalUri] } : {};
             const cascadeId = await startCascade(inst, startOpts);
             registerCascadeInstance(cascadeId, inst);
             const opts = { modelId, inst };

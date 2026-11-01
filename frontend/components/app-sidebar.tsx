@@ -132,6 +132,28 @@ export function AppSidebar({
     const [createError, setCreateError] = useState("")
     const [showCreateDialog, setShowCreateDialog] = useState(false)
     const [deleteTarget, setDeleteTarget] = useState<ConvRow | null>(null)
+    const [looseMenuOpenId, setLooseMenuOpenId] = useState<string | null>(null)
+    const looseTouchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const isLooseLongPressRef = useRef(false)
+
+    const handleLooseTouchStart = (convId: string) => {
+        isLooseLongPressRef.current = false;
+        if (looseTouchTimerRef.current) clearTimeout(looseTouchTimerRef.current);
+        looseTouchTimerRef.current = setTimeout(() => {
+            isLooseLongPressRef.current = true;
+            if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                try { navigator.vibrate(40); } catch {}
+            }
+            setLooseMenuOpenId(convId);
+        }, 450);
+    };
+
+    const handleLooseTouchEnd = () => {
+        if (looseTouchTimerRef.current) {
+            clearTimeout(looseTouchTimerRef.current);
+            looseTouchTimerRef.current = null;
+        }
+    };
 
     // Filter and sort state
     const [hideArchived, setHideArchived] = useState<boolean>(() => {
@@ -552,11 +574,26 @@ export function AppSidebar({
                                 <SidebarGroupContent>
                                     <SidebarMenu>
                                         {filteredAndSortedLoose.slice(0, LOOSE_LIMIT).map((conv) => (
-                                            <SidebarMenuItem key={conv.id} className="group/conv relative flex items-center">
+                                            <SidebarMenuItem
+                                                key={conv.id}
+                                                className="group/conv relative flex items-center select-none"
+                                                onContextMenu={(e) => {
+                                                    e.preventDefault();
+                                                    setLooseMenuOpenId(conv.id);
+                                                }}
+                                                onTouchStart={() => handleLooseTouchStart(conv.id)}
+                                                onTouchEnd={handleLooseTouchEnd}
+                                                onTouchMove={handleLooseTouchEnd}
+                                                onTouchCancel={handleLooseTouchEnd}
+                                            >
                                                 <SidebarMenuButton
                                                     isActive={conv.id === currentConvId}
                                                     onClick={(e) => {
                                                         e.preventDefault();
+                                                        if (isLooseLongPressRef.current) {
+                                                            isLooseLongPressRef.current = false;
+                                                            return;
+                                                        }
                                                         onSelectConversation(conv.id, conv.projectName || 'unknown');
                                                     }}
                                                     tooltip={`${conv.title}\n${conv.stepCount} steps · ${conv.status || 'idle'}${conv.archived ? ' (archived)' : ''}`}
@@ -566,7 +603,7 @@ export function AppSidebar({
                                                     <span className="truncate min-w-0 flex-1">{conv.title}</span>
                                                 </SidebarMenuButton>
                                                 <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover/conv:opacity-100 transition-opacity">
-                                                    <DropdownMenu>
+                                                    <DropdownMenu open={looseMenuOpenId === conv.id} onOpenChange={(open) => setLooseMenuOpenId(open ? conv.id : null)}>
                                                         <DropdownMenuTrigger asChild>
                                                             <Button variant="ghost" size="icon" className="h-6 w-6 p-0 text-sidebar-foreground/50 hover:text-sidebar-foreground">
                                                                 <MoreHorizontal className="h-3.5 w-3.5" />

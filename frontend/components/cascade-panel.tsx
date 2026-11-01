@@ -336,13 +336,6 @@ export function CascadePanel({ currentConvId, currentWorkspace, wsVersion, onCas
                                                                             H {q.remainingPct}%
                                                                         </span>
                                                                     )}
-                                                                    <div className="h-1 flex-1 rounded-full bg-muted overflow-hidden">
-                                                                        <div
-                                                                            className={cn('h-full rounded-full transition-all', q.remainingPct > 50 ? 'bg-emerald-400' : q.remainingPct > 20 ? 'bg-amber-400' : 'bg-red-400')}
-                                                                            style={{ width: `${q.remainingPct}%` }}
-                                                                        />
-                                                                    </div>
-                                                                    <span className="text-[9px] text-muted-foreground/60 font-mono w-7 text-right">{q.remainingPct}%</span>
                                                                 </>
                                                             );
                                                         })()}

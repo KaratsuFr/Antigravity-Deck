@@ -339,7 +339,10 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
         Promise.all([getWorkspaces(), fetchModels, fetch(`${API_BASE}/api/settings`, { headers: authHeaders() }).then(r => r.json()).catch(() => null)])
             .then(([ws, modelsResp, settingsResp]) => {
                 setWorkspaces(ws);
-                if (currentWorkspace !== null) {
+                if (newChatWorkspaceUri) {
+                    const uriIdx = ws.findIndex(w => w.workspaceFolderUri === newChatWorkspaceUri);
+                    if (uriIdx >= 0) setSelectedWs(uriIdx);
+                } else if (currentWorkspace !== null) {
                     const wsIdx = ws.findIndex(w => w.workspaceName === currentWorkspace);
                     setSelectedWs(wsIdx >= 0 ? wsIdx : 0);
                 }
@@ -412,7 +415,10 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
             if (activeCascadeId) {
                 await cascadeSend(activeCascadeId, text, selectedModel || undefined, mediaItems);
             } else {
-                const result = await cascadeSubmit(text, selectedModel || undefined, mediaItems, currentWorkspace || undefined, newChatWorkspaceUri || undefined);
+                const activeWs = selectedWs !== null && workspaces[selectedWs] ? workspaces[selectedWs] : null;
+                const targetWorkspace = activeWs?.workspaceName || currentWorkspace || undefined;
+                const targetWorkspaceUri = newChatWorkspaceUri || (activeWs?.workspaceFolderUri?.startsWith('file:') ? activeWs.workspaceFolderUri : undefined);
+                const result = await cascadeSubmit(text, selectedModel || undefined, mediaItems, targetWorkspace, targetWorkspaceUri);
                 const newId = result.cascadeId;
                 setLocalCascadeId(newId);
                 onCascadeCreated(newId);
@@ -798,15 +804,6 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                                                                 H {q.remainingPct}%
                                                                             </span>
                                                                         )}
-                                                                        <div className="w-8 h-1.5 rounded-full bg-muted overflow-hidden">
-                                                                            <div
-                                                                                className={cn(
-                                                                                    "h-full rounded-full transition-all",
-                                                                                    q.remainingPct > 50 ? "bg-emerald-500/80" : q.remainingPct > 20 ? "bg-amber-500/80" : "bg-destructive/80"
-                                                                                )}
-                                                                                style={{ width: `${q.remainingPct}%` }}
-                                                                            />
-                                                                        </div>
                                                                     </div>
                                                                 </DropdownMenuItem>
                                                             );

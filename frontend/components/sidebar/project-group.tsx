@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from 'react'
-import { Trash2, ChevronRight, FolderGit2, MessageSquare, Plus, Pin, Archive, ArchiveRestore, MoreHorizontal } from 'lucide-react'
+import { Trash2, ChevronRight, FolderGit2, MessageSquare, Plus, Pin, Archive, ArchiveRestore, MoreHorizontal, Brain, AlertCircle, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { API_BASE } from '@/lib/config'
 import { authHeaders } from '@/lib/auth'
 import type { ConvRow } from '@/lib/conversations'
@@ -62,33 +62,50 @@ interface ProjectGroupProps {
 export function ConvStatusDot({ status, pinned }: { status?: string; pinned?: boolean }) {
     if (status === 'CASCADE_RUN_STATUS_RUNNING') {
         return (
-            <span className="relative flex h-2 w-2 shrink-0 mr-1.5" title="Running">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500" />
+            <span className="relative flex items-center justify-center h-4 w-4 shrink-0 mr-1.5" title="Thinking / Generating...">
+                <span className="animate-ping absolute inline-flex h-2.5 w-2.5 rounded-full bg-purple-400 opacity-60" />
+                <Brain className="relative h-3.5 w-3.5 text-purple-400 animate-pulse" />
             </span>
         );
     }
     if (status === 'CASCADE_RUN_STATUS_WAITING_FOR_USER') {
         return (
-            <span className="relative flex h-2 w-2 shrink-0 mr-1.5" title="Waiting for user input">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+            <span className="relative flex items-center justify-center h-4 w-4 shrink-0 mr-1.5" title="Waiting for user input...">
+                <span className="animate-ping absolute inline-flex h-2.5 w-2.5 rounded-full bg-amber-400 opacity-60" />
+                <AlertCircle className="relative h-3.5 w-3.5 text-amber-400 animate-bounce" />
             </span>
         );
     }
     if (status === 'CASCADE_RUN_STATUS_ERROR') {
         return (
-            <span className="inline-flex rounded-full h-2 w-2 bg-destructive shrink-0 mr-1.5" title="Error" />
+            <span className="inline-flex items-center justify-center h-4 w-4 shrink-0 mr-1.5" title="Error">
+                <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
+            </span>
+        );
+    }
+    if (status === 'CASCADE_RUN_STATUS_DONE' || status === 'CASCADE_RUN_STATUS_IDLE') {
+        if (pinned) {
+            return (
+                <span title="Pinned (Done)" className="inline-flex items-center gap-0.5 shrink-0 mr-1.5">
+                    <Pin className="h-2.5 w-2.5 text-amber-500 fill-amber-500" />
+                    <CheckCircle2 className="h-3 w-3 text-emerald-500/80" />
+                </span>
+            );
+        }
+        return (
+            <span title="Done" className="inline-flex items-center justify-center h-4 w-4 shrink-0 mr-1.5">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500/80" />
+            </span>
         );
     }
     if (pinned) {
         return (
-            <span title="Pinned" className="inline-flex shrink-0 mr-1.5">
-                <Pin className="h-2.5 w-2.5 text-amber-500 fill-amber-500" />
+            <span title="Pinned" className="inline-flex items-center justify-center h-4 w-4 shrink-0 mr-1.5">
+                <Pin className="h-3 w-3 text-amber-500 fill-amber-500" />
             </span>
         );
     }
-    return <MessageSquare className="h-3 w-3 shrink-0 mr-1.5 opacity-60" />;
+    return <MessageSquare className="h-3.5 w-3.5 shrink-0 mr-1.5 opacity-60" />;
 }
 
 export function ProjectGroup({

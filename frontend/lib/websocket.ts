@@ -26,6 +26,13 @@ interface WSState {
     workspaceResources: ResourceSnapshot | null; // full resource snapshot
 }
 
+interface CachedConvState {
+    steps: Step[];
+    baseIndex: number;
+    stepCount: number;
+    cascadeStatus: string | null;
+}
+
 // === Seamless resume: cache UI state for instant restore on mobile cold-reload ===
 const CACHE_KEY_DETECTED = 'antigravity-cached-detected';
 const CACHE_KEY_STEPS = 'antigravity-cached-steps';
@@ -93,6 +100,21 @@ export function useWebSocket() {
 
     // Keep ref in sync with state
     useEffect(() => { currentConvIdRef.current = state.currentConvId; }, [state.currentConvId]);
+
+    // Multi-chat in-memory cache: keeps nominal active chats (3+) resident in client memory
+    const convCacheRef = useRef<Map<string, CachedConvState>>(new Map());
+
+    // Initialize memory cache with cold-boot restored data
+    useEffect(() => {
+        if (storedConvId && hasCachedData && cachedSteps) {
+            convCacheRef.current.set(storedConvId, {
+                steps: cachedSteps.steps as Step[],
+                baseIndex: cachedSteps.baseIndex,
+                stepCount: cachedSteps.stepCount,
+                cascadeStatus: null,
+            });
+        }
+    }, []);
 
     const loadConversations = useCallback(async () => {
         try {
@@ -175,11 +197,23 @@ export function useWebSocket() {
         });
 
         const offStepsInit = wsService.on('steps_init', (data) => {
+            const convId = (data.conversationId as string) || currentConvIdRef.current;
+            const incoming = (data.steps as Step[]) || [];
+            const incomingBase = (data.baseIndex as number) ?? 0;
+            const incomingCount = (data.stepCount as number) ?? incoming.length;
+
+            if (convId) {
+                const prevCached = convCacheRef.current.get(convId);
+                convCacheRef.current.set(convId, {
+                    steps: incoming,
+                    baseIndex: incomingBase,
+                    stepCount: incomingCount,
+                    cascadeStatus: prevCached?.cascadeStatus || null,
+                });
+            }
+
             setState(prev => {
                 if (data.conversationId && data.conversationId !== prev.currentConvId) return prev;
-                const incoming = (data.steps as Step[]) || [];
-                const incomingBase = (data.baseIndex as number) ?? 0;
-                const incomingCount = (data.stepCount as number) ?? incoming.length;
 
                 // Cache steps for seamless mobile resume
                 _saveCachedSteps(incoming, incomingBase, incomingCount, prev.currentConvId);
@@ -209,13 +243,16 @@ export function useWebSocket() {
                 };
             });
             // Fetch cascade status on init (handles reload/reconnect)
-            const convId = (data.conversationId as string) || currentConvIdRef.current;
             if (convId) {
                 getCascadeStatus(convId)
                     .then(s => {
+                        const status = s.status || null;
+                        if (convCacheRef.current.has(convId)) {
+                            convCacheRef.current.get(convId)!.cascadeStatus = status;
+                        }
                         setState(prev => {
                             if (prev.currentConvId !== convId) return prev;
-                            return { ...prev, cascadeStatus: s.status || null };
+                            return { ...prev, cascadeStatus: status };
                         });
                     })
                     .catch(() => { /* ignore — status unavailable */ });
@@ -223,14 +260,40 @@ export function useWebSocket() {
         });
 
         const offStepsNew = wsService.on('steps_new', (data) => {
-            console.log('[WS] steps_new received:', (data.steps as Step[])?.length, 'for', (data.conversationId as string)?.substring(0, 8));
+            const convId = data.conversationId as string;
+            const newSteps = (data.steps as Step[]) || [];
+            if (newSteps.length === 0) return;
+
+            // Update in-memory cache for inactive background chats
+            if (convId && convCacheRef.current.has(convId)) {
+                const cached = convCacheRef.current.get(convId)!;
+                const cachedEnd = cached.baseIndex + cached.steps.length;
+                const incomingBase = (data.baseIndex as number) ?? cached.baseIndex;
+                const newStepCount = (data.stepCount as number) ?? (cached.stepCount + newSteps.length);
+                const newStart = incomingBase + (typeof data.total === 'number' ? data.total - newSteps.length : (newStepCount - newSteps.length));
+                const skipCount = Math.max(0, cachedEnd - newStart);
+                const actualNew = newSteps.slice(skipCount);
+                if (actualNew.length > 0) {
+                    let finalSteps = [...cached.steps, ...actualNew];
+                    let finalBase = cached.baseIndex;
+                    if (finalSteps.length > 600) {
+                        const excess = finalSteps.length - 500;
+                        finalSteps = finalSteps.slice(excess);
+                        finalBase += excess;
+                    }
+                    convCacheRef.current.set(convId, {
+                        ...cached,
+                        steps: finalSteps,
+                        baseIndex: finalBase,
+                        stepCount: newStepCount,
+                    });
+                }
+            }
+
             setState(prev => {
                 if (data.conversationId && data.conversationId !== prev.currentConvId) {
-                    console.log('[WS] steps_new SKIP: conv mismatch', (data.conversationId as string)?.substring(0, 8), '!=', prev.currentConvId?.substring(0, 8));
                     return prev;
                 }
-                const newSteps = (data.steps as Step[]) || [];
-                if (newSteps.length === 0) return prev;
 
                 const incomingBase = (data.baseIndex as number) ?? prev.baseIndex;
                 const newStepCount = (data.stepCount as number) ?? (prev.stepCount + newSteps.length);
@@ -268,6 +331,15 @@ export function useWebSocket() {
         });
 
         const offStepUpdated = wsService.on('step_updated', (data) => {
+            const convId = data.conversationId as string;
+            if (convId && convCacheRef.current.has(convId)) {
+                const cached = convCacheRef.current.get(convId)!;
+                const localIndex = (data.index as number) - cached.baseIndex;
+                if (localIndex >= 0 && localIndex < cached.steps.length) {
+                    cached.steps[localIndex] = data.step as Step;
+                }
+            }
+
             setState(prev => {
                 if (data.conversationId && data.conversationId !== prev.currentConvId) return prev;
                 // Convert server-absolute index to local array index
@@ -280,20 +352,36 @@ export function useWebSocket() {
         });
 
         const offCascadeStatus = wsService.on('cascade_status', (data) => {
+            const convId = data.conversationId as string;
+            const status = (data.status as string) || '';
+
+            if (convId && convCacheRef.current.has(convId)) {
+                convCacheRef.current.get(convId)!.cascadeStatus = status;
+            }
+
             setState(prev => {
-                if (data.conversationId && data.conversationId !== prev.currentConvId) return prev;
-                const newState = { ...prev, cascadeStatus: data.status as string };
-                const isDone = data.status !== 'CASCADE_RUN_STATUS_RUNNING' &&
-                               data.status !== 'CASCADE_RUN_STATUS_WAITING_FOR_USER';
-                if (isDone && prev.cascadeStatus && prev.cascadeStatus !== data.status) {
+                const isCurrent = !convId || convId === prev.currentConvId;
+                const nextConvs = { ...prev.conversations };
+                if (convId && nextConvs[convId]) {
+                    nextConvs[convId] = { ...nextConvs[convId], status };
+                }
+
+                const newState: WSState = {
+                    ...prev,
+                    conversations: nextConvs,
+                    cascadeStatus: isCurrent ? status : prev.cascadeStatus,
+                };
+
+                const isDone = status !== 'CASCADE_RUN_STATUS_RUNNING' &&
+                               status !== 'CASCADE_RUN_STATUS_WAITING_FOR_USER';
+                if (isDone && prev.cascadeStatus && prev.cascadeStatus !== status) {
                     newState.conversationsVersion = prev.conversationsVersion + 1;
-                    // Auto re-sync step content: backend just invalidated cache,
-                    // re-send set_conversation to get fresh steps_init with finalized data.
-                    // steps_init handler uses merge (not replace) so no visible flicker.
-                    const convId = prev.currentConvId;
-                    if (convId) {
-                        wsService?.send({ type: 'set_conversation', conversationId: convId });
+                    const currentId = prev.currentConvId;
+                    if (currentId && currentId === convId) {
+                        wsService?.send({ type: 'set_conversation', conversationId: currentId });
                     }
+                } else if (status !== prev.cascadeStatus) {
+                    newState.conversationsVersion = prev.conversationsVersion + 1;
                 }
                 return newState;
             });
@@ -329,18 +417,47 @@ export function useWebSocket() {
     }, []);
 
     const selectConversation = useCallback((id: string | null) => {
-        currentConvIdRef.current = id; // update ref immediately for WS handlers
-        // Clear cached steps when switching conversations
-        try { localStorage.removeItem(CACHE_KEY_STEPS); } catch {}
-        setState(prev => ({
-            ...prev,
-            currentConvId: id,
-            steps: [],
-            baseIndex: 0,
-            stepCount: 0,
-            loadingOlder: false,
-            cascadeStatus: null,
-        }));
+        // Save current active conversation into in-memory cache before switching
+        if (currentConvIdRef.current) {
+            setState(prev => {
+                if (prev.currentConvId && prev.steps.length > 0) {
+                    convCacheRef.current.set(prev.currentConvId, {
+                        steps: prev.steps,
+                        baseIndex: prev.baseIndex,
+                        stepCount: prev.stepCount,
+                        cascadeStatus: prev.cascadeStatus,
+                    });
+                }
+                return prev;
+            });
+        }
+
+        currentConvIdRef.current = id;
+
+        // Instant switch: if target conversation is cached in memory, show it immediately without blank screen
+        if (id && convCacheRef.current.has(id)) {
+            const cached = convCacheRef.current.get(id)!;
+            setState(prev => ({
+                ...prev,
+                currentConvId: id,
+                steps: cached.steps,
+                baseIndex: cached.baseIndex,
+                stepCount: cached.stepCount,
+                loadingOlder: false,
+                cascadeStatus: cached.cascadeStatus,
+            }));
+        } else {
+            setState(prev => ({
+                ...prev,
+                currentConvId: id,
+                steps: [],
+                baseIndex: 0,
+                stepCount: 0,
+                loadingOlder: false,
+                cascadeStatus: null,
+            }));
+        }
+
         if (id && wsService) {
             wsService.send({ type: 'set_conversation', conversationId: id });
         }

@@ -6,17 +6,21 @@
 
 ## 1. Vue d'Ensemble & Modèle Hub
 
-Antigravity Deck est une interface web & PWA (Node.js Express + Next.js 16 Turbopack) permettant de piloter à distance le démon local d'Antigravity (`agy`).
+Antigravity Deck est une interface web & PWA unifiée (Architecture Monolithe Node.js Express servant à la fois l'API ConnectRPC, les WebSockets et le bundle statique Next.js 16) permettant de piloter à distance le démon local d'Antigravity (`agy`).
 
 ```mermaid
 flowchart LR
-    A["Navigateur Mobile / PWA<br/>(Client Next.js)"] <-->|"HTTP :9808<br/>WS :9809"| B["Backend Deck<br/>(Express / Node.js)"]
+    A["Navigateur Mobile / PWA<br/>(Client React SPA)"] <-->|"HTTP & WS unifiés<br/>Port :9808"| B["Monolithe Deck<br/>(server.js / Express)"]
     B <-->|"ConnectRPC HTTP<br/>(Port dynamique 35317)"| C["agy remote-control<br/>Language Server (Go)"]
     C <-->|"Lecture / Écriture"| D["Bases SQLite & Proto<br/>(/root/.gemini/antigravity-cli)"]
 ```
 
 ### Concepts Clés
+- **Monolithe Unifié** : Un seul processus Node.js (`server.js`) écoute sur le port `:9808`. Il sert les routes d'API `/api/*`, gère les WebSockets sur le même port via HTTP Upgrade, et distribue l'interface statique compilée (`frontend/out`).
+- **Multi-chat nominal & Cache Client** : Le frontend conserve en mémoire vive un cache des 10 dernières conversations actives (`convCacheRef`). Le changement de conversation est instantané (zéro écran blanc) et les flux en arrière-plan continuent d'enrichir le cache.
+- **Icônes d'activité en temps réel** : La sidebar affiche distinctement l'état de chaque conversation (Thinking/Generating avec `Brain`, Waiting user input avec `AlertCircle`, Done avec `CheckCircle2`, Error avec `AlertTriangle`).
 - **Hub Model** : Un seul Language Server central tourne sur la machine sous `agy remote-control serve`. Ses ports HTTP et gRPC sont attribués aléatoirement à chaque démarrage.
+- **Optimisation RPC & Polling** : Les appels vers le Language Server sont dédupliqués par socket socket (`port:csrfToken`). Le polling actif s'exécute à 2s avec un re-scan restreint aux étapes de queue (taille 3 au lieu de 20), et les blocages manuels (`WAITING_FOR_USER`) bénéficient d'un cooldown de 10s pour supprimer le pilonnage CPU inutile.
 - **Authentification & CSRF** : Chaque appel au Language Server nécessite l'en-tête `x-codeium-csrf-token` et `Connect-Protocol-Version: 1`. Le token CSRF est stocké en mémoire dans le processus Go et dans le fichier `hub.json`.
 - **Jetbox & Trajectoires** : Les conversations, steps et diffs ne sont pas générés par Deck mais streamés depuis les structures de données d'`agy`.
 
@@ -28,7 +32,7 @@ flowchart LR
 
 | Fichier / Dossier | Rôle & Responsabilité | Points d'Attention |
 | :--- | :--- | :--- |
-| `src/server.js` | Point d'entrée backend Express, configuration des middlewares, sessions, tunnel et démarrage WS. | Port d'écoute par défaut : `9808` (backend + static Next.js). |
+| `server.js` | Point d'entrée serveur Express unifié (monolithe), configuration des middlewares, API ConnectRPC, WebSockets et distribution du bundle statique `frontend/out`. | Port d'écoute : `9808` (configurable via `PORT`). |
 | `src/detector.js` | Détecteur automatique du Language Server. Boucle adaptative (10s si connecté, 2s si déconnecté). | Invoque `scripts/discover-hub.py` si `hub.json` est invalide ou absent. |
 | `scripts/discover-hub.py` | Découverte ultra-rapide (< 0.4s) du PID `agy`, de son port HTTP via `ss -tlpn` et extraction directe du token CSRF depuis la mémoire Go (`ANTIGRAVITY_CSRF_TOKEN=`). | Ne pas utiliser de regex exhaustives sur le heap Go (360 Mo+) ; toujours privilégier la recherche de sous-chaîne directe. |
 | `src/proxy.js` | Proxy HTTP inverse vers le Language Server. Injecte le token CSRF et gère les timeouts. | Valide strictement les méthodes autorisées contre la whitelist. |

@@ -73,6 +73,8 @@ def extract_tokens(pid):
                     raw = env[idx+23:idx+23+36].decode("ascii", errors="ignore")
                     if token_re.match(raw):
                         candidates.add(raw)
+            except (FileNotFoundError, ProcessLookupError, PermissionError):
+                pass
             except Exception:
                 pass
     except Exception:

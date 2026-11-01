@@ -307,6 +307,8 @@ async function locateHub() {
                 if (result) {
                     return { pid: process.pid, csrfToken: data.csrfToken, port: result.port, useTls: result.useTls };
                 }
+                // If hub.json port responded ECONNREFUSED or failed, remove it so stale port is not probed repeatedly
+                try { fs.unlinkSync(hubFile); } catch { }
             }
         } catch (e) {
             console.error('[!] Failed reading hub.json:', e.message);
@@ -434,7 +436,7 @@ function switchToInstance(index) {
 
 // Periodic re-scan for hub presence + tracked-workspace changes (Adaptive)
 const NORMAL_RESCAN_INTERVAL = 10000;
-const FAST_RESCAN_INTERVAL = 2000;
+const FAST_RESCAN_INTERVAL = 1000;
 let rescanTimer = null;
 let lastDetectedState = false; // track detection state transitions
 

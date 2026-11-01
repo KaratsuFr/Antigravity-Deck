@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { User, RefreshCw, Calendar, Clock, Zap } from 'lucide-react';
 import { ProfileSwitcher } from './profile-switcher';
+import { UsageView } from './usage-view';
 
 export function UserProfile() {
     const [user, setUser] = useState<any>(null);
@@ -199,66 +200,10 @@ export function AccountInfoView() {
                 {/* Profile Swap */}
                 <ProfileSwitcher />
 
-                {/* Model Usage */}
-                <div>
-                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                        <User className="h-3 w-3" /> Model Usage
-                    </h3>
-                    <div className="space-y-2">
-                        {models.map((model, i) => {
-                            const pct = Math.round(model.quota * 100);
-                            return (
-                                <div key={i} className="px-4 py-3 rounded-lg border border-border/40 bg-muted/10">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <div className="flex items-center gap-2 min-w-0">
-                                            <span className="text-xs font-medium truncate">{model.label}</span>
-                                            {model.isRecommended && (
-                                                <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-amber-500/30 text-amber-500 shrink-0">★</Badge>
-                                            )}
-                                        </div>
-                                        <span className={cn(
-                                            "text-xs font-semibold tabular-nums shrink-0",
-                                            pct > 50 ? "text-emerald-400" :
-                                                pct > 20 ? "text-amber-400" : "text-red-400"
-                                        )}>
-                                            {pct}%
-                                        </span>
-                                    </div>
-                                    <div className="h-1.5 bg-muted/30 rounded-full overflow-hidden">
-                                        <div
-                                            className={cn(
-                                                "h-full rounded-full transition-all duration-500",
-                                                pct > 50 ? "bg-emerald-500/70" :
-                                                    pct > 20 ? "bg-amber-500/70" : "bg-red-500/70"
-                                            )}
-                                            style={{ width: `${pct}%` }}
-                                        />
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
+                {/* Official Quota & Usage View */}
+                <div className="rounded-xl border border-border/50 bg-card p-4">
+                    <UsageView />
                 </div>
-
-                {/* Reset Timing */}
-                <div className="rounded-xl border border-border/50 bg-muted/10 p-4">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
-                                <Calendar className="h-4 w-4 text-amber-400" />
-                            </div>
-                            <div>
-                                <div className="text-xs font-medium">Credits Reset</div>
-                                <div className="text-[10px] text-muted-foreground">{resetDateStr}</div>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 text-right">
-                            <Clock className="h-3 w-3 text-muted-foreground" />
-                            <span className="text-sm font-semibold text-amber-400">{countdown}</span>
-                        </div>
-                    </div>
-                </div>
-
             </div>
         </div>
     );

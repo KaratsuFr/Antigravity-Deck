@@ -25,6 +25,8 @@ import {
 import { Settings, Folder, Zap, BarChart2, RefreshCcw, SendHorizontal, Square, Paperclip, GitBranch, Plus, X, ChevronDown, Activity, Download, Bell, BellOff, Rocket, ArrowDown as ArrowDownIcon, Camera, Brain, Image as ImageIcon, Star } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { notificationService, NOTIFICATION_SETTINGS_CHANGED } from '@/lib/notifications';
+import { UsageView } from './usage-view';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 
 function formatThinkingLevel(label: string): string {
     if (!label) return 'Default';
@@ -96,6 +98,7 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
     // activeCascadeId: derived from currentConvId, with local override for new chats
     const [localCascadeId, setLocalCascadeId] = useState<string | null>(null);
     const [showSourceControl, setShowSourceControl] = useState(false);
+    const [showUsageDialog, setShowUsageDialog] = useState(false);
     const activeCascadeId = localCascadeId ?? currentConvId;
     const [showScrollBtn, setShowScrollBtn] = useState(false);
     const prevStepsLenRef = useRef(0);
@@ -723,69 +726,95 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                                                     {formatThinkingLevel(selectedModelLabel)}
                                                 </span>
                                                 {selectedModelQuota && (
-                                                    <span className={cn(
-                                                        "text-[9px] font-mono px-1 py-0.5 rounded border leading-none shrink-0 font-medium",
-                                                        selectedModelQuota.windowType === '4h'
-                                                            ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
-                                                            : "bg-purple-500/10 text-purple-400 border-purple-500/30"
-                                                    )} title={`Quota ${selectedModelQuota.windowType}: ${selectedModelQuota.remainingPct}% restant (${selectedModelQuota.consumedPct}% consommé)`}>
-                                                        {selectedModelQuota.windowType} {selectedModelQuota.remainingPct}%
-                                                     </span>
+                                                    selectedModelQuota.isWeeklyExhausted ? (
+                                                        <span className="text-[9px] font-mono px-1 py-0.5 rounded border leading-none shrink-0 font-medium bg-destructive/15 text-destructive border-destructive/30" title="Quota hebdomadaire épuisé">
+                                                            0% épuisé
+                                                        </span>
+                                                    ) : selectedModelQuota.fiveHourPct !== null && selectedModelQuota.weeklyPct !== null ? (
+                                                        <span className="text-[9px] font-mono px-1 py-0.5 rounded border leading-none shrink-0 font-medium bg-sky-500/10 text-sky-400 border-sky-500/30" title={`Quota 5h: ${selectedModelQuota.fiveHourPct}% · Hebdo: ${selectedModelQuota.weeklyPct}%`}>
+                                                            5h: {selectedModelQuota.fiveHourPct}% · H: {selectedModelQuota.weeklyPct}%
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-[9px] font-mono px-1 py-0.5 rounded border leading-none shrink-0 font-medium bg-purple-500/10 text-purple-400 border-purple-500/30" title={`Quota Hebdo: ${selectedModelQuota.remainingPct}%`}>
+                                                            H: {selectedModelQuota.remainingPct}%
+                                                        </span>
+                                                    )
                                                 )}
                                                 <ChevronDown className="h-3 w-3 opacity-50 shrink-0" />
                                             </Button>
                                         </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="start" className="w-80 max-w-[94vw]">
-                                            {modelDisplayGroups.map((group, gi) => (
-                                                <DropdownMenuGroup key={group.name || `g${gi}`}>
-                                                    {/* IDE shows a flat list when there's a single group; only label real sub-groups. */}
-                                                    {modelDisplayGroups.length > 1 && group.name && (
-                                                        <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground/70 py-1">{group.name}</DropdownMenuLabel>
-                                                    )}
-                                                    {group.models.map(m => {
-                                                        const q = getModelQuotaDetails(m);
-                                                        return (
-                                                            <DropdownMenuItem
-                                                                key={m.modelId || m.label}
-                                                                onClick={() => setSelectedModel(m.modelId)}
-                                                                title={`${formatThinkingLevel(m.label)}\nFenêtre: ${q.windowType}${q.countdown ? ` (reset dans ${q.countdown})` : ''}\nRestant: ${q.remainingPct}%\nConsommé: ${q.consumedPct}%`}
-                                                                className={cn('cursor-pointer flex items-center justify-between gap-2 py-1.5',
-                                                                    m.modelId === selectedModel && 'text-primary font-medium bg-accent/40')}
-                                                            >
-                                                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                                                    <span className="truncate text-xs">{formatThinkingLevel(m.label)}</span>
-                                                                    {m.tagTitle && <Badge variant="secondary" className="text-[9px] h-3.5 px-1 shrink-0" title={m.tagDescription || undefined}>{m.tagTitle}</Badge>}
-                                                                    {m.isRecommended && <Badge variant="secondary" className="text-[9px] h-3.5 px-1 shrink-0"><Star className="w-2.5 h-2.5 text-amber-400" /></Badge>}
-                                                                </div>
-                                                                <div className="flex items-center gap-1.5 shrink-0">
-                                                                    {m.supportsImages && <span className="text-[9px]"><ImageIcon className="h-3 w-3 text-muted-foreground/50" /></span>}
-                                                                    <span className={cn(
-                                                                        "text-[8px] font-mono px-1 py-0.5 rounded border leading-none font-semibold",
-                                                                        q.windowType === '4h'
-                                                                            ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
-                                                                            : "bg-purple-500/10 text-purple-400 border-purple-500/30"
-                                                                    )}>
-                                                                        {q.windowType}
-                                                                    </span>
-                                                                    <div className="w-10 h-1.5 rounded-full bg-muted overflow-hidden">
-                                                                        <div
-                                                                            className={cn(
-                                                                                "h-full rounded-full transition-all",
-                                                                                q.remainingPct > 50 ? "bg-emerald-500/80" : q.remainingPct > 20 ? "bg-amber-500/80" : "bg-destructive/80"
-                                                                            )}
-                                                                            style={{ width: `${q.remainingPct}%` }}
-                                                                        />
+                                        <DropdownMenuContent align="start" className="w-84 max-w-[94vw] p-0">
+                                            <div className="flex items-center justify-between px-3 py-2 border-b border-border/40 bg-muted/20">
+                                                <span className="text-xs font-semibold text-foreground/80">Modèles & Quotas</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowUsageDialog(true)}
+                                                    className="flex items-center gap-1 text-[11px] font-medium text-primary hover:text-primary/80 transition-colors cursor-pointer"
+                                                >
+                                                    <Activity className="h-3.5 w-3.5" />
+                                                    <span>Détail Usage</span>
+                                                </button>
+                                            </div>
+                                            <div className="p-1 max-h-[60vh] overflow-y-auto">
+                                                {modelDisplayGroups.map((group, gi) => (
+                                                    <DropdownMenuGroup key={group.name || `g${gi}`}>
+                                                        {/* IDE shows a flat list when there's a single group; only label real sub-groups. */}
+                                                        {modelDisplayGroups.length > 1 && group.name && (
+                                                            <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground/70 py-1">{group.name}</DropdownMenuLabel>
+                                                        )}
+                                                        {group.models.map(m => {
+                                                            const q = getModelQuotaDetails(m);
+                                                            const hasBoth = q.fiveHourPct !== null && q.weeklyPct !== null && !q.isWeeklyExhausted;
+                                                            return (
+                                                                <DropdownMenuItem
+                                                                    key={m.modelId || m.label}
+                                                                    onClick={() => setSelectedModel(m.modelId)}
+                                                                    title={`${formatThinkingLevel(m.label)}\n${q.groupName ? `Groupe: ${q.groupName}\n` : ''}${q.fiveHourPct !== null ? `5h: ${q.fiveHourPct}%\n` : ''}${q.weeklyPct !== null ? `Hebdo: ${q.weeklyPct}%\n` : ''}Reset: ${q.countdown || '—'}`}
+                                                                    className={cn('cursor-pointer flex items-center justify-between gap-2 py-1.5',
+                                                                        m.modelId === selectedModel && 'text-primary font-medium bg-accent/40')}
+                                                                >
+                                                                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                                                        <span className="truncate text-xs">{formatThinkingLevel(m.label)}</span>
+                                                                        {m.tagTitle && <Badge variant="secondary" className="text-[9px] h-3.5 px-1 shrink-0" title={m.tagDescription || undefined}>{m.tagTitle}</Badge>}
+                                                                        {m.isRecommended && <Badge variant="secondary" className="text-[9px] h-3.5 px-1 shrink-0"><Star className="w-2.5 h-2.5 text-amber-400" /></Badge>}
                                                                     </div>
-                                                                    <span className="text-[10px] font-mono tabular-nums text-muted-foreground w-7 text-right">
-                                                                        {q.remainingPct}%
-                                                                    </span>
-                                                                </div>
-                                                            </DropdownMenuItem>
-                                                        );
-                                                    })}
-                                                    {gi < modelDisplayGroups.length - 1 && <DropdownMenuSeparator />}
-                                                </DropdownMenuGroup>
-                                            ))}
+                                                                    <div className="flex items-center gap-1.5 shrink-0">
+                                                                        {m.supportsImages && <span className="text-[9px]"><ImageIcon className="h-3 w-3 text-muted-foreground/50" /></span>}
+                                                                        {q.isWeeklyExhausted ? (
+                                                                            <span className="text-[8px] font-mono px-1 py-0.5 rounded border leading-none font-semibold bg-destructive/15 text-destructive border-destructive/30">
+                                                                                0% épuisé
+                                                                            </span>
+                                                                        ) : hasBoth ? (
+                                                                            <div className="flex items-center gap-1 text-[8px] font-mono leading-none">
+                                                                                <span className="px-1 py-0.5 rounded border bg-sky-500/10 text-sky-400 border-sky-500/30 font-semibold" title={`5h: ${q.fiveHourPct}%`}>
+                                                                                    5h {q.fiveHourPct}%
+                                                                                </span>
+                                                                                <span className="px-1 py-0.5 rounded border bg-purple-500/10 text-purple-400 border-purple-500/30 font-semibold" title={`Hebdo: ${q.weeklyPct}%`}>
+                                                                                    H {q.weeklyPct}%
+                                                                                </span>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <span className="text-[8px] font-mono px-1 py-0.5 rounded border leading-none font-semibold bg-purple-500/10 text-purple-400 border-purple-500/30">
+                                                                                H {q.remainingPct}%
+                                                                            </span>
+                                                                        )}
+                                                                        <div className="w-8 h-1.5 rounded-full bg-muted overflow-hidden">
+                                                                            <div
+                                                                                className={cn(
+                                                                                    "h-full rounded-full transition-all",
+                                                                                    q.remainingPct > 50 ? "bg-emerald-500/80" : q.remainingPct > 20 ? "bg-amber-500/80" : "bg-destructive/80"
+                                                                                )}
+                                                                                style={{ width: `${q.remainingPct}%` }}
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                </DropdownMenuItem>
+                                                            );
+                                                        })}
+                                                        {gi < modelDisplayGroups.length - 1 && <DropdownMenuSeparator />}
+                                                    </DropdownMenuGroup>
+                                                ))}
+                                            </div>
                                         </DropdownMenuContent>
                                     </DropdownMenu>
 
@@ -998,6 +1027,13 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                     </div>
                 </>
             )}
+
+            <Dialog open={showUsageDialog} onOpenChange={setShowUsageDialog}>
+                <DialogContent className="max-w-md p-0 overflow-hidden bg-background border-border">
+                    <DialogTitle className="sr-only">Usage des Quotas</DialogTitle>
+                    <UsageView onBack={() => setShowUsageDialog(false)} />
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

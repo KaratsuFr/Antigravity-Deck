@@ -53,6 +53,19 @@ export interface SelfStats {
     totalMemMB: number;
 }
 
+export interface ModelQuotaGroupBucket {
+    remainingFraction: number;
+    resetTime: string | null;
+    description?: string;
+    disabled?: boolean;
+}
+
+export interface ModelQuotaGroupDetails {
+    groupName: string;
+    weekly: ModelQuotaGroupBucket | null;
+    fiveHour: ModelQuotaGroupBucket | null;
+}
+
 export interface CascadeModel {
     label: string;
     modelId: string;
@@ -63,64 +76,114 @@ export interface CascadeModel {
     tagDescription?: string;  // badge tooltip, e.g. "Limited time"
     quota: number; // 0-1 fraction remaining
     resetTime?: string | null;
+    quotaDetails?: ModelQuotaGroupDetails | null;
+}
+
+export interface QuotaBucket {
+    bucketId: string;
+    displayName: string;
+    description?: string;
+    window: 'weekly' | '5h' | string;
+    remainingFraction?: number;
+    disabled?: boolean;
+    resetTime?: string | null;
+}
+
+export interface QuotaGroup {
+    displayName: string;
+    description?: string;
+    buckets: QuotaBucket[];
+}
+
+export interface QuotaSummary {
+    groups: QuotaGroup[];
+    description?: string;
 }
 
 export interface ModelQuotaDetails {
     remainingPct: number;
     consumedPct: number;
-    windowType: '4h' | 'Hebdo' | '24h';
+    weeklyPct: number | null;
+    fiveHourPct: number | null;
+    isWeeklyExhausted: boolean;
+    isFiveHourDisabled: boolean;
+    windowType: '5h' | 'Hebdo' | '24h';
     countdown: string;
     resetDateStr: string;
+    groupName: string | null;
+}
+
+export function formatResetCountdown(isoDate: string | null | undefined): string {
+    if (!isoDate) return '';
+    const t = new Date(isoDate).getTime();
+    if (isNaN(t)) return '';
+    const diffMs = t - Date.now();
+    if (diffMs <= 0) return 'bientôt';
+    const hours = diffMs / 3600000;
+    if (hours >= 24) {
+        const days = Math.floor(hours / 24);
+        const h = Math.floor(hours % 24);
+        return `${days}d ${h}h`;
+    }
+    const h = Math.floor(hours);
+    const m = Math.floor((diffMs % 3600000) / 60000);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
 export function getModelQuotaDetails(m: CascadeModel): ModelQuotaDetails {
-    const quotaVal = typeof m.quota === 'number' && !isNaN(m.quota) ? m.quota : 1;
-    const remainingPct = Math.round(quotaVal * 100);
+    const qDetails = m.quotaDetails;
+    const weeklyPct = qDetails?.weekly ? Math.round((qDetails.weekly.remainingFraction ?? 0) * 100) : null;
+    const fiveHourPct = qDetails?.fiveHour ? Math.round((qDetails.fiveHour.remainingFraction ?? 1) * 100) : null;
+    const isWeeklyExhausted = weeklyPct !== null && weeklyPct <= 0;
+    const isFiveHourDisabled = !!qDetails?.fiveHour?.disabled || isWeeklyExhausted;
+
+    let remainingPct = Math.round((typeof m.quota === 'number' && !isNaN(m.quota) ? m.quota : 1) * 100);
+    if (isWeeklyExhausted) {
+        remainingPct = 0;
+    } else if (fiveHourPct !== null && !isFiveHourDisabled) {
+        remainingPct = fiveHourPct;
+    } else if (weeklyPct !== null) {
+        remainingPct = weeklyPct;
+    }
     const consumedPct = Math.max(0, 100 - remainingPct);
 
-    let windowType: '4h' | 'Hebdo' | '24h' = 'Hebdo';
+    let windowType: '5h' | 'Hebdo' | '24h' = 'Hebdo';
+    if (qDetails?.fiveHour && !isFiveHourDisabled) {
+        windowType = '5h';
+    } else {
+        windowType = 'Hebdo';
+    }
+
+    const effectiveResetTime = (isWeeklyExhausted ? qDetails?.weekly?.resetTime : null)
+        || (windowType === '5h' ? qDetails?.fiveHour?.resetTime : null)
+        || qDetails?.weekly?.resetTime
+        || m.resetTime;
+
     let countdown = '';
     let resetDateStr = '';
-
-    if (m.resetTime) {
-        const t = new Date(m.resetTime).getTime();
+    if (effectiveResetTime) {
+        const t = new Date(effectiveResetTime).getTime();
         if (!isNaN(t)) {
-            resetDateStr = new Date(m.resetTime).toLocaleString('fr-FR', {
+            resetDateStr = new Date(effectiveResetTime).toLocaleString('fr-FR', {
                 weekday: 'short',
                 hour: '2-digit',
                 minute: '2-digit',
             });
-            const diffMs = t - Date.now();
-            const hours = diffMs / 3600000;
-            if (hours <= 6) {
-                windowType = '4h';
-                const mRemaining = Math.max(0, Math.floor((diffMs % 3600000) / 60000));
-                const hRemaining = Math.max(0, Math.floor(hours));
-                countdown = hRemaining > 0 ? `${hRemaining}h${mRemaining > 0 ? `${mRemaining}m` : ''}` : `${mRemaining}m`;
-            } else if (hours <= 26) {
-                windowType = '24h';
-                countdown = `${Math.round(hours)}h`;
-            } else {
-                windowType = 'Hebdo';
-                const days = Math.floor(hours / 24);
-                const h = Math.floor(hours % 24);
-                countdown = days > 0 ? `${days}j${h > 0 ? `${h}h` : ''}` : `${h}h`;
-            }
-        }
-    } else {
-        if (m.label.toLowerCase().includes('flash')) {
-            windowType = '4h';
-        } else {
-            windowType = 'Hebdo';
+            countdown = formatResetCountdown(effectiveResetTime);
         }
     }
 
     return {
         remainingPct,
         consumedPct,
+        weeklyPct,
+        fiveHourPct,
+        isWeeklyExhausted,
+        isFiveHourDisabled,
         windowType,
         countdown,
         resetDateStr,
+        groupName: qDetails?.groupName || null,
     };
 }
 
@@ -258,10 +321,21 @@ export async function updateSettings(settings: Partial<AppSettings>): Promise<Ap
 
 // Get available cascade models. `groups` mirrors the Antigravity IDE picker's
 // sections/order; `models` is the same set flattened (backward compatible).
-export async function getModels(): Promise<{ models: CascadeModel[]; groups: CascadeModelGroup[]; defaultModel: string }> {
+export async function getModels(): Promise<{ models: CascadeModel[]; groups: CascadeModelGroup[]; defaultModel: string; quotaSummary?: QuotaSummary | null }> {
     const res = await fetch(`${API_BASE}/api/models`, { headers: authHeaders() });
     if (!res.ok) throw new Error(`Models failed: ${res.status}`);
     return res.json();
+}
+
+// Official user quota summary directly from Language Server RetrieveUserQuotaSummary
+export async function getQuotaSummary(): Promise<QuotaSummary | null> {
+    try {
+        const res = await fetch(`${API_BASE}/api/user/quota-summary`, { headers: authHeaders() });
+        if (!res.ok) return null;
+        return await res.json();
+    } catch {
+        return null;
+    }
 }
 
 // Cancel an active cascade invocation

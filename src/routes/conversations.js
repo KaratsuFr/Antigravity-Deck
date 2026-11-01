@@ -62,19 +62,83 @@ module.exports = function setupConversationsRoutes(app) {
             // picker still loads before a folder is opened.
             const inst = resolveInst(req);
             if (!inst) return res.status(503).json({ error: 'IDE not connected' });
-            const data = await callApi('GetCascadeModelConfigData', {}, inst);
 
-            const mapModel = (m) => ({
-                label: m.label,
-                modelId: m.modelOrAlias?.model || m.modelOrAlias?.alias || '',
-                supportsImages: !!m.supportsImages,
-                isRecommended: !!m.isRecommended,
-                isBeta: !!m.isBeta,
-                tagTitle: m.tagTitle || '',
-                tagDescription: m.tagDescription || '',
-                quota: m.quotaInfo?.remainingFraction ?? 1,
-                resetTime: m.quotaInfo?.resetTime || null,
-            });
+            const [data, quotaSummaryRes] = await Promise.all([
+                callApi('GetCascadeModelConfigData', {}, inst),
+                callApi('RetrieveUserQuotaSummary', {}, inst).catch(() => null),
+            ]);
+
+            const quotaGroups = quotaSummaryRes?.response?.groups || [];
+
+            function findModelQuota(label, modelId) {
+                const lower = `${label} ${modelId}`.toLowerCase();
+                let group = null;
+                if (lower.includes('argon')) {
+                    group = quotaGroups.find(g => g.displayName?.toLowerCase().includes('argon'));
+                } else if (lower.includes('claude') || lower.includes('gpt') || lower.includes('openai')) {
+                    group = quotaGroups.find(g => g.displayName?.toLowerCase().includes('claude'));
+                } else if (lower.includes('gemini') || lower.includes('flash')) {
+                    group = quotaGroups.find(g => g.displayName?.toLowerCase().includes('gemini models'));
+                }
+                if (!group) return null;
+                const weekly = group.buckets?.find(b => b.window === 'weekly');
+                const fiveH = group.buckets?.find(b => b.window === '5h');
+                return {
+                    groupName: group.displayName,
+                    weekly: weekly ? {
+                        remainingFraction: typeof weekly.remainingFraction === 'number' ? weekly.remainingFraction : 0,
+                        resetTime: weekly.resetTime || null,
+                        description: weekly.description || '',
+                    } : null,
+                    fiveHour: fiveH ? {
+                        remainingFraction: typeof fiveH.remainingFraction === 'number' ? fiveH.remainingFraction : 1,
+                        resetTime: fiveH.resetTime || null,
+                        disabled: !!fiveH.disabled,
+                        description: fiveH.description || '',
+                    } : null,
+                };
+            }
+
+            const mapModel = (m) => {
+                const label = m.label;
+                const modelId = m.modelOrAlias?.model || m.modelOrAlias?.alias || '';
+                const quotaDetails = findModelQuota(label, modelId);
+
+                // Real quota calculation from official RetrieveUserQuotaSummary:
+                // If weekly quota is exhausted (0), effective quota is 0!
+                let effectiveQuota = 1;
+                let effectiveReset = null;
+
+                if (quotaDetails?.weekly && quotaDetails.weekly.remainingFraction <= 0.001) {
+                    effectiveQuota = 0;
+                    effectiveReset = quotaDetails.weekly.resetTime;
+                } else if (quotaDetails?.fiveHour && !quotaDetails.fiveHour.disabled) {
+                    effectiveQuota = quotaDetails.fiveHour.remainingFraction;
+                    effectiveReset = quotaDetails.fiveHour.resetTime;
+                } else if (quotaDetails?.weekly) {
+                    effectiveQuota = quotaDetails.weekly.remainingFraction;
+                    effectiveReset = quotaDetails.weekly.resetTime;
+                } else if (m.quotaInfo?.resetTime && m.quotaInfo?.remainingFraction === undefined) {
+                    effectiveQuota = 0;
+                    effectiveReset = m.quotaInfo.resetTime;
+                } else if (m.quotaInfo?.remainingFraction !== undefined) {
+                    effectiveQuota = m.quotaInfo.remainingFraction;
+                    effectiveReset = m.quotaInfo.resetTime || null;
+                }
+
+                return {
+                    label,
+                    modelId,
+                    supportsImages: !!m.supportsImages,
+                    isRecommended: !!m.isRecommended,
+                    isBeta: !!m.isBeta,
+                    tagTitle: m.tagTitle || '',
+                    tagDescription: m.tagDescription || '',
+                    quota: effectiveQuota,
+                    resetTime: effectiveReset,
+                    quotaDetails: quotaDetails || null,
+                };
+            };
 
             // LS omits `disabled` when false; drop only models explicitly disabled.
             const configs = (data.clientModelConfigs || []).filter(m => m.disabled !== true);
@@ -102,8 +166,19 @@ module.exports = function setupConversationsRoutes(app) {
             // Flat list (backward compatible) = groups flattened, already in IDE order.
             const models = groups.flatMap(g => g.models);
             const defaultModel = data.defaultOverrideModelConfig?.modelOrAlias?.model || '';
-            res.json({ models, groups, defaultModel });
+            res.json({ models, groups, defaultModel, quotaSummary: quotaSummaryRes?.response || null });
         } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    // Official user quota summary (Gemini Models, Claude and GPT models, Gemini 4 Argon)
+    app.get('/api/user/quota-summary', async (req, res) => {
+        try {
+            const inst = resolveInst(req);
+            const data = await callApi('RetrieveUserQuotaSummary', {}, inst);
+            res.json(data.response || {});
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
     });
 
     // Full conversation history — from the Jetbox stream (all projects, all-time).

@@ -318,12 +318,24 @@ export function CascadePanel({ currentConvId, currentWorkspace, wsVersion, onCas
                                                             const q = getModelQuotaDetails(m);
                                                             return (
                                                                 <>
-                                                                    <span className={cn(
-                                                                        "text-[7px] font-mono px-0.5 py-0 rounded border leading-none font-semibold",
-                                                                        q.windowType === '4h' ? "bg-sky-500/10 text-sky-400 border-sky-500/30" : "bg-purple-500/10 text-purple-400 border-purple-500/30"
-                                                                    )}>
-                                                                        {q.windowType}
-                                                                    </span>
+                                                                    {q.isWeeklyExhausted ? (
+                                                                        <span className="text-[7px] font-mono px-0.5 py-0 rounded border leading-none font-semibold bg-destructive/15 text-destructive border-destructive/30">
+                                                                            0% épuisé
+                                                                        </span>
+                                                                    ) : q.fiveHourPct !== null && q.weeklyPct !== null ? (
+                                                                        <div className="flex items-center gap-1 text-[7px] font-mono leading-none">
+                                                                            <span className="px-0.5 py-0 rounded border bg-sky-500/10 text-sky-400 border-sky-500/30 font-semibold">
+                                                                                5h {q.fiveHourPct}%
+                                                                            </span>
+                                                                            <span className="px-0.5 py-0 rounded border bg-purple-500/10 text-purple-400 border-purple-500/30 font-semibold">
+                                                                                H {q.weeklyPct}%
+                                                                            </span>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <span className="text-[7px] font-mono px-0.5 py-0 rounded border leading-none font-semibold bg-purple-500/10 text-purple-400 border-purple-500/30">
+                                                                            H {q.remainingPct}%
+                                                                        </span>
+                                                                    )}
                                                                     <div className="h-1 flex-1 rounded-full bg-muted overflow-hidden">
                                                                         <div
                                                                             className={cn('h-full rounded-full transition-all', q.remainingPct > 50 ? 'bg-emerald-400' : q.remainingPct > 20 ? 'bg-amber-400' : 'bg-red-400')}

@@ -82,6 +82,7 @@ const SAFE_LS_METHODS = [
     'StreamCascadeReactiveUpdates',
     'StreamCascadeSummariesReactiveUpdates',
     'StreamUserTrajectoryReactiveUpdates',
+    'RetrieveUserQuotaSummary',
 ];
 
 // Mutating methods intentionally exposed via the proxy (hand-curated).

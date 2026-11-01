@@ -498,9 +498,17 @@ async function handleAutoAcceptDirect(cascadeId, inst, stepInfo = null) {
             body.interaction = interaction;
             console.log(`[AutoAccept] >>> Accepting ${cascadeId.substring(0, 8)} step[${stepInfo.stepIndex}] on ${inst.workspaceName}:${inst.port} (${(stepInfo.step?.type || '').replace('CORTEX_STEP_TYPE_', '')})`);
         } else {
-            // Build failed or manual decision needed — throttle checks for this step
+            // Build failed or manual decision needed (permission gate, ask_question, etc.)
+            // Throttle checks for this step (10s) and send a push notification to user
+            const isFirstSeen = !unhandledManualSteps.has(manualKey);
             unhandledManualSteps.set(manualKey, Date.now());
             console.log(`[AutoAccept] >>> Could not build interaction for ${cascadeId.substring(0, 8)} step[${stepInfo.stepIndex}] (manual gate, throttled 10s)`);
+            if (isFirstSeen) {
+                try {
+                    const { handleWaitingStepPush } = require('./push-service');
+                    handleWaitingStepPush(cascadeId, stepInfo);
+                } catch {}
+            }
             return;
         }
     } else {

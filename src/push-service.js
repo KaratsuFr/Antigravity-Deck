@@ -272,6 +272,44 @@ function handleCascadeStatusPush(convId, prevStatus, newStatus, convInfo) {
     }
 }
 
+// Called when a step is in WAITING state and requires manual user approval/interaction
+function handleWaitingStepPush(convId, stepInfo, convInfo) {
+    if (!isEventEnabled('waitingForUser')) return;
+    const label = convLabel(convId, convInfo);
+    let body = 'Waiting for your approval.';
+
+    const step = stepInfo?.step;
+    if (step) {
+        const notifyMsg = step.notifyUser?.notificationContent || step.notifyUser?.message;
+        if (notifyMsg && typeof notifyMsg === 'string') {
+            body = notifyMsg.trim().substring(0, 120);
+        } else if (step.type === 'CORTEX_STEP_TYPE_ASK_QUESTION' || step.askQuestion) {
+            const q = step.askQuestion?.question || step.askQuestion?.text;
+            if (q) body = String(q).trim().substring(0, 120);
+            else body = 'Cascade is asking you a question.';
+        } else if (step.type === 'CORTEX_STEP_TYPE_RUN_COMMAND' || step.codeAction) {
+            const cmd = step.codeAction?.actionSpec?.command?.commandLine || step.codeAction?.description;
+            if (cmd) body = `Command: ${String(cmd).trim().substring(0, 100)}`;
+            else body = 'Command awaiting your approval.';
+        } else if (step.filePermission || step.requestedInteraction?.filePermission) {
+            body = 'File access permission requested.';
+        } else {
+            const last = extractLastStepContent(convId);
+            if (last) body = last;
+        }
+    } else {
+        const last = extractLastStepContent(convId);
+        if (last) body = last;
+    }
+
+    sendPushToAll({
+        title: `⏳ ${label} — Action Required`,
+        body,
+        tag: `waiting-${convId.substring(0, 8)}`,
+        data: { url: '/', convId },
+    });
+}
+
 // Called from auto-accept.js when a step is auto-accepted
 // convInfo is optional: the trajectorySummary object ({ summary, ... })
 function handleAutoAcceptedPush(convId, convInfo) {
@@ -292,5 +330,6 @@ module.exports = {
     addSubscription,
     removeSubscription,
     handleCascadeStatusPush,
+    handleWaitingStepPush,
     handleAutoAcceptedPush,
 };

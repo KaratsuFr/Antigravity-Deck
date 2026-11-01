@@ -61,7 +61,10 @@ module.exports = function setupCascadeRoutes(app) {
             if (!finalUri && inst && inst.workspaceFolderUri && inst.workspaceFolderUri.startsWith('file:')) {
                 finalUri = inst.workspaceFolderUri;
             }
-            const startOpts = finalUri ? { workspaceUris: [finalUri] } : {};
+            const startOpts = {};
+            if (finalUri) startOpts.workspaceUris = [finalUri];
+            if (workspace) startOpts.workspace = workspace;
+            if (req.body.projectId) startOpts.projectId = req.body.projectId;
             const cascadeId = await startCascade(inst, startOpts);
             registerCascadeInstance(cascadeId, inst);
             const opts = { modelId, inst };

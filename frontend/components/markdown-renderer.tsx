@@ -246,7 +246,7 @@ const MD_COMPONENTS = {
         return (
             <div className="code-block-wrapper">
                 {language && <span className="code-lang-label">{language}</span>}
-                <CopyButton text={String(children).replace(/\n$/, '')} />
+                <CopyButton text={extractTextContent(children).replace(/\n$/, '')} />
                 <code className={className} {...props}>{children}</code>
             </div>
         );
@@ -273,6 +273,15 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, classN
         </div>
     );
 });
+
+function extractTextContent(node: any): string {
+    if (!node) return '';
+    if (typeof node === 'string') return node;
+    if (typeof node === 'number') return String(node);
+    if (Array.isArray(node)) return node.map(extractTextContent).join('');
+    if (node.props && node.props.children) return extractTextContent(node.props.children);
+    return '';
+}
 
 function CopyButton({ text }: { text: string }) {
     const [copied, setCopied] = useState(false);

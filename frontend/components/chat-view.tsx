@@ -91,9 +91,33 @@ function generateThumbnail(base64: string, mimeType: string, maxSize = 128): Pro
     });
 }
 
+const DRAFT_STORAGE_KEY_PREFIX = 'antigravity-draft-input-';
+
+function getDraftForConv(convId: string | null): string {
+    if (typeof window === 'undefined') return '';
+    const key = `${DRAFT_STORAGE_KEY_PREFIX}${convId || 'new'}`;
+    try {
+        return sessionStorage.getItem(key) || '';
+    } catch {
+        return '';
+    }
+}
+
+function saveDraftForConv(convId: string | null, value: string) {
+    if (typeof window === 'undefined') return;
+    const key = `${DRAFT_STORAGE_KEY_PREFIX}${convId || 'new'}`;
+    try {
+        if (!value) {
+            sessionStorage.removeItem(key);
+        } else {
+            sessionStorage.setItem(key, value);
+        }
+    } catch {}
+}
+
 // === Main Chat View ===
 export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = false, onLoadOlder, currentConvId, currentWorkspace, newChatWorkspaceUri, wsVersion, cascadeStatus, onCascadeCreated, onNewConversation, showTimeline, onSetShowTimeline, showAnalytics, onToggleAnalytics, onExport, onShowSettings }: ChatViewProps) {
-    const [input, setInput] = useState('');
+    const [input, setInput] = useState(() => getDraftForConv(currentConvId));
     const [sending, setSending] = useState(false);
     // activeCascadeId: derived from currentConvId, with local override for new chats
     const [localCascadeId, setLocalCascadeId] = useState<string | null>(null);
@@ -198,6 +222,15 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
             inputRef.current.style.height = '';
         }
     }, [input]);
+
+    // Restore draft input when current conversation changes
+    useEffect(() => {
+        const savedDraft = getDraftForConv(currentConvId);
+        setInput(savedDraft);
+        if (inputRef.current) {
+            inputRef.current.style.height = '';
+        }
+    }, [currentConvId]);
 
     // Merge optimistic pending message into displayed steps
     const displaySteps = useMemo(() => {
@@ -424,13 +457,14 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
                 onCascadeCreated(newId);
             }
             setInput('');
+            saveDraftForConv(activeCascadeId || currentConvId, '');
             setPendingImages([]);
         } catch (e) {
             console.error('Send error:', e);
         } finally {
             setSending(false);
         }
-    }, [input, sending, activeCascadeId, selectedWs, selectedModel, pendingImages, currentWorkspace, newChatWorkspaceUri, onCascadeCreated]);
+    }, [input, sending, activeCascadeId, currentConvId, selectedWs, selectedModel, pendingImages, currentWorkspace, newChatWorkspaceUri, onCascadeCreated]);
 
     // Image handling — shared processor for adding files to pending images
     const processImageFile = useCallback((file: File) => {
@@ -531,20 +565,23 @@ export function ChatView({ steps, baseIndex = 0, stepCount = 0, loadingOlder = f
     // Workflow autocomplete: detect "/" at start of input
     const handleInputChange = useCallback((val: string) => {
         setInput(val);
+        saveDraftForConv(currentConvId, val);
         if (val.startsWith('/')) {
             setShowWorkflows(true);
             setWorkflowQuery(val.slice(1)); // text after "/"
         } else {
             setShowWorkflows(false);
         }
-    }, []);
+    }, [currentConvId]);
 
     // Workflow selection: insert slash command into input (user sends manually)
     const handleWorkflowSelect = useCallback((workflow: WorkflowItem) => {
         setShowWorkflows(false);
-        setInput(workflow.slash + ' ');
+        const val = workflow.slash + ' ';
+        setInput(val);
+        saveDraftForConv(currentConvId, val);
         inputRef.current?.focus();
-    }, []);
+    }, [currentConvId]);
 
     // Key handling — workflow autocomplete intercepts arrow/enter/escape first
     const autocompleteRef = useRef<WorkflowAutocompleteHandle | null>(null);

@@ -853,11 +853,11 @@ export function AppSidebar({
                                                         onSelectConversation(conv.id, conv.projectName || 'unknown');
                                                     }}
                                                     tooltip={`${conv.title}\n${conv.stepCount} steps · ${conv.status || 'idle'}${conv.archived ? ' (archived)' : ''}${conv.unread ? ' · Unread' : ''}`}
-                                                    className={cn("text-xs peer pr-8 flex items-center min-w-0 flex-1", conv.archived && "opacity-50")}
+                                                    className={cn("text-xs peer pr-8 flex items-center justify-start min-w-0 flex-1 text-left", conv.archived && "opacity-50")}
                                                 >
                                                     <ConvStatusDot status={conv.status} pinned={conv.pinned} unread={conv.unread} />
                                                     <span className={cn(
-                                                        "truncate min-w-0 flex-1",
+                                                        "truncate min-w-0 flex-1 text-left",
                                                         conv.unread ? "font-medium text-foreground" : "text-sidebar-foreground/80"
                                                     )}>
                                                         {conv.title}

@@ -267,11 +267,12 @@ async function pollConversation(activeConvId, info) {
             return;
         }
 
-        // Fetch last 20 steps from cache + any new steps beyond cache
-        // REFRESH_TAIL=20 ensures streaming content updates are caught
-        const REFRESH_TAIL = 20;
+        // Fetch only tail steps to catch streaming updates, or newly added steps.
+        // When step count is unchanged, only the last active step could be streaming (tail=3).
+        const isStreamingSameCount = newStepCount === cachedLen;
+        const refreshTail = isStreamingSameCount ? 3 : 15;
         const fetchTo = newStepCount;
-        const fetchFrom = Math.max(0, Math.min(fetchTo, cachedLen - REFRESH_TAIL));
+        const fetchFrom = Math.max(0, Math.min(fetchTo, cachedLen - refreshTail));
 
         if (fetchTo <= 0) return;
 

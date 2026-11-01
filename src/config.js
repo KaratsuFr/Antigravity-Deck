@@ -15,7 +15,7 @@ if (portIdx > -1 && process.argv[portIdx + 1]) {
 
 const PORT = portOverride || parseInt(process.env.PORT, 10) || 3500;
 const POLL_INTERVAL = 3000;
-const FAST_POLL_INTERVAL = 1000;  // Active cascade (running / waiting for user)
+const FAST_POLL_INTERVAL = 2000;  // Active cascade (running / waiting for user)
 const SLOW_POLL_INTERVAL = 5000;  // Idle
 const BATCH_SIZE = 200;
 const STEP_WINDOW_SIZE = 500;       // max steps to hold in memory per conversation

@@ -13,6 +13,7 @@ const path = require('path');
 // State — persisted in settings.json so it survives restarts
 let autoAcceptEnabled = !!(getSettings().autoAccept);
 const autoAcceptedSet = new Set(); // debounce: track already auto-accepted cascade+step combos
+const unhandledManualSteps = new Map(); // key: "cascadeId:stepIndex" -> timestamp of last check (throttle manual gates)
 
 // --- Security: Workspace Path Validation ---
 
@@ -481,17 +482,25 @@ async function handleAutoAcceptDirect(cascadeId, inst, stepInfo = null) {
     if (autoAcceptedSet.has(debounceKey)) return;
 
     // Build interaction payload BEFORE adding to debounce set.
-    // If build fails (path not found, unknown type), we must NOT lock the key
-    // — otherwise the step stays stuck for 15s with no retry.
+    // If build fails (path not found, unknown type, or manual permission gate),
+    // throttle retry for 10s on this exact stepIndex to avoid tight polling CPU burn.
     const body = { cascadeId };
     if (stepInfo) {
+        const manualKey = `${cascadeId}:${stepInfo.stepIndex}`;
+        const lastCheck = unhandledManualSteps.get(manualKey);
+        if (lastCheck && (Date.now() - lastCheck) < 10000) {
+            return; // Skip: in 10s cooldown for this manual gate step
+        }
+
         const interaction = buildInteraction(stepInfo, { autoAcceptMode: true });
         if (interaction) {
+            unhandledManualSteps.delete(manualKey);
             body.interaction = interaction;
             console.log(`[AutoAccept] >>> Accepting ${cascadeId.substring(0, 8)} step[${stepInfo.stepIndex}] on ${inst.workspaceName}:${inst.port} (${(stepInfo.step?.type || '').replace('CORTEX_STEP_TYPE_', '')})`);
         } else {
-            // Build failed — don't add to debounce, allow retry on next poll cycle
-            console.log(`[AutoAccept] >>> Could not build interaction for ${cascadeId.substring(0, 8)}, skipping`);
+            // Build failed or manual decision needed — throttle checks for this step
+            unhandledManualSteps.set(manualKey, Date.now());
+            console.log(`[AutoAccept] >>> Could not build interaction for ${cascadeId.substring(0, 8)} step[${stepInfo.stepIndex}] (manual gate, throttled 10s)`);
             return;
         }
     } else {
@@ -613,7 +622,7 @@ async function buildAcceptPayload(cascadeId, instOrNull = null) {
 // to detect WAITING steps and auto-accept them.
 
 let autoAcceptTimer = null;
-const AUTO_ACCEPT_POLL_MS = 1500;
+const AUTO_ACCEPT_POLL_MS = 2000;
 let isAutoAcceptRunning = false;
 
 function startAutoAcceptPolling() {
@@ -629,8 +638,12 @@ async function autoAcceptPollNow() {
     isAutoAcceptRunning = true;
 
     try {
-        // Poll EACH LS instance independently — NO lsConfig mutation!
+        // Poll each UNIQUE connection once — virtual workspaces share the same hub port
+        const seenConns = new Set();
         for (const inst of instances) {
+            const connKey = `${inst.useTls ? 's' : ''}${inst.port}:${inst.csrfToken}`;
+            if (seenConns.has(connKey)) continue;
+            seenConns.add(connKey);
             try {
                 const summaries = await callApiOnInstance(inst, 'GetAllCascadeTrajectories');
                 const trajectories = summaries?.trajectorySummaries || {};

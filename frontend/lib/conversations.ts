@@ -145,6 +145,25 @@ export function toggleConversationRead(id: string, currentlyUnread: boolean, las
     } catch {}
 }
 
+export function markMultipleAsRead(convs: { id: string; lastModified?: string; stepCount?: number }[]): void {
+    if (typeof window === 'undefined' || !convs || convs.length === 0) return;
+    try {
+        const map = getLocalReadMap();
+        const now = Date.now();
+        for (const c of convs) {
+            if (!c.id) continue;
+            const modTime = c.lastModified ? new Date(c.lastModified).getTime() : now;
+            const validTime = isNaN(modTime) ? now : modTime;
+            map[c.id] = {
+                lastReadTime: Math.max(now, validTime),
+                lastReadStepCount: c.stepCount ?? (map[c.id]?.lastReadStepCount || 0),
+            };
+        }
+        localStorage.setItem(READ_STORAGE_KEY, JSON.stringify(map));
+        window.dispatchEvent(new CustomEvent('antigravity-read-updated', { detail: { bulk: true } }));
+    } catch {}
+}
+
 export function checkAndInitReadStates(summaries: Record<string, RawSummary>) {
     if (typeof window === 'undefined') return;
     try {

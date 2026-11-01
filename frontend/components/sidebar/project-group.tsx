@@ -1,11 +1,11 @@
 "use client"
 
 import { useState, useRef } from 'react'
-import { Trash2, ChevronRight, FolderGit2, MessageSquare, Plus, Pin, Archive, ArchiveRestore, MoreHorizontal, Brain, AlertCircle, CheckCircle2, AlertTriangle, Check } from 'lucide-react'
+import { Trash2, ChevronRight, FolderGit2, MessageSquare, Plus, Pin, Archive, ArchiveRestore, MoreHorizontal, Brain, AlertCircle, CheckCircle2, AlertTriangle, Check, CheckCheck } from 'lucide-react'
 import { API_BASE } from '@/lib/config'
 import { authHeaders } from '@/lib/auth'
 import type { ConvRow } from '@/lib/conversations'
-import { updateConversationAnnotations, toggleConversationRead } from '@/lib/conversations'
+import { updateConversationAnnotations, toggleConversationRead, markMultipleAsRead } from '@/lib/conversations'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -191,6 +191,8 @@ export function ProjectGroup({
         }
     }
 
+    const hasUnread = conversations.some(c => c.unread);
+
     return (
         <>
             <SidebarMenu>
@@ -200,6 +202,30 @@ export function ProjectGroup({
                             <SidebarMenuButton tooltip={name} className="text-xs !pr-2">
                                 <FolderGit2 className="shrink-0" />
                                 <span className="flex-1 truncate min-w-0">{name}</span>
+                                {hasUnread && (
+                                    <span
+                                        role="button"
+                                        tabIndex={0}
+                                        aria-label="Mark all as read in this project"
+                                        title="Mark all as read in this project"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            markMultipleAsRead(conversations.map(c => ({ id: c.id, lastModified: c.lastModified, stepCount: c.stepCount })));
+                                            onUpdated?.();
+                                        }}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' || e.key === ' ') {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                markMultipleAsRead(conversations.map(c => ({ id: c.id, lastModified: c.lastModified, stepCount: c.stepCount })));
+                                                onUpdated?.();
+                                            }
+                                        }}
+                                        className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-sky-500 hover:text-sky-400 hover:bg-sidebar-accent"
+                                    >
+                                        <CheckCheck className="h-3.5 w-3.5" />
+                                    </span>
+                                )}
                                 <span
                                     role="button"
                                     tabIndex={0}

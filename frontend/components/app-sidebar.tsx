@@ -58,12 +58,12 @@ import {
 import {
     Settings, User, Plug, Book, Globe, Moon, Sun, Plus, FolderPlus,
     EllipsisVertical, Activity, FolderSync, Loader2, GitBranch, Monitor,
-    Workflow, Brain, History, MessageSquare, SlidersHorizontal, Check,
+    Workflow, Brain, History, MessageSquare, SlidersHorizontal, Check, CheckCheck,
     Pin, Archive, ArchiveRestore, MoreHorizontal, Trash2
 } from "lucide-react"
 
 import { ConvStatusDot, ProjectGroup } from "./sidebar/project-group"
-import { updateConversationAnnotations, markConversationAsRead, toggleConversationRead } from "@/lib/conversations"
+import { updateConversationAnnotations, markConversationAsRead, toggleConversationRead, markMultipleAsRead } from "@/lib/conversations"
 import { SystemResourceSummary } from "./sidebar/system-resource-summary"
 
 const EXPANDED_STORAGE_KEY = 'antigravity-sidebar-expanded-projects';
@@ -507,6 +507,26 @@ export function AppSidebar({
         return list
     }, [byProject, loose, hideArchived, convSort])
 
+    const allConversations = useMemo(() => {
+        const list: ConvRow[] = []
+        const seen = new Set<string>()
+        for (const rows of byProject.values()) {
+            for (const r of rows) {
+                if (!seen.has(r.id)) {
+                    seen.add(r.id)
+                    list.push(r)
+                }
+            }
+        }
+        for (const r of loose) {
+            if (!seen.has(r.id)) {
+                seen.add(r.id)
+                list.push(r)
+            }
+        }
+        return list
+    }, [byProject, loose])
+
     const handleConfirmDelete = async () => {
         if (!deleteTarget) return
         const targetId = deleteTarget.id
@@ -687,6 +707,19 @@ export function AppSidebar({
                         <div className="flex items-center justify-between px-3 py-1 text-xs font-medium text-sidebar-foreground/70">
                             <span>Projects</span>
                             <div className="flex items-center gap-0.5">
+                                {allConversations.some(c => c.unread) && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            markMultipleAsRead(allConversations.map(c => ({ id: c.id, lastModified: c.lastModified, stepCount: c.stepCount })));
+                                            loadIndex();
+                                        }}
+                                        className="flex h-5 w-5 items-center justify-center rounded text-sky-500 hover:text-sky-400 hover:bg-sidebar-accent cursor-pointer transition-colors"
+                                        title="Mark all as read"
+                                    >
+                                        <CheckCheck className="h-3.5 w-3.5" />
+                                    </button>
+                                )}
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
                                         <button

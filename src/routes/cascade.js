@@ -41,6 +41,7 @@ module.exports = function setupCascadeRoutes(app) {
                 opts.imageBase64 = imageBase64; // legacy single-image fallback
             }
             const inst = resolveInst(req);
+            try { require('../waiting-state').setCascadeWaiting(cascadeId, false); } catch {}
             sendMessage(cascadeId, message, { ...opts, inst }).catch(e => console.error('[Cascade send error]', e.message));
             res.json({ ok: true, cascadeId });
         } catch (e) { res.status(500).json({ error: e.message }); }
@@ -163,6 +164,7 @@ module.exports = function setupCascadeRoutes(app) {
 
                     if (result.ok) {
                         console.log(`[ManualInteract] +++ ${isReject ? 'REJECTED' : 'ACCEPTED'} via ${inst.workspaceName}`);
+                        try { require('../waiting-state').setCascadeWaiting(cascadeId, false); } catch {}
                         return res.json(result);
                     }
                     console.log(`[ManualInteract] --- FAILED on ${inst.workspaceName}: ${result.error || result.data}, trying next...`);
@@ -215,6 +217,7 @@ module.exports = function setupCascadeRoutes(app) {
     app.post('/api/cascade/:id/cancel', async (req, res) => {
         try {
             const inst = resolveInst(req);
+            try { require('../waiting-state').setCascadeWaiting(req.params.id, false); } catch {}
             const result = await callApi('CancelCascadeInvocation', {
                 cascadeId: req.params.id,
             }, inst);

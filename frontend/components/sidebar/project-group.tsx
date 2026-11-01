@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef } from 'react'
-import { Trash2, ChevronRight, FolderGit2, MessageSquare, Plus, Pin, Archive, ArchiveRestore, MoreHorizontal, Brain, AlertCircle, CheckCircle2, AlertTriangle, Check, CheckCheck } from 'lucide-react'
+import { Trash2, ChevronRight, FolderGit2, MessageSquare, Plus, Pin, Archive, ArchiveRestore, MoreHorizontal, Brain, Bell, AlertCircle, CheckCircle2, AlertTriangle, Check, CheckCheck } from 'lucide-react'
 import { API_BASE } from '@/lib/config'
 import { authHeaders } from '@/lib/auth'
 import type { ConvRow } from '@/lib/conversations'
@@ -70,9 +70,12 @@ export function ConvStatusDot({ status, pinned, unread }: { status?: string; pin
     }
     if (status === 'CASCADE_RUN_STATUS_WAITING_FOR_USER') {
         return (
-            <span className="relative flex items-center justify-center h-4 w-4 shrink-0 mr-1.5" title="Waiting for user input...">
-                <span className="animate-ping absolute inline-flex h-2.5 w-2.5 rounded-full bg-amber-400 opacity-60" />
-                <AlertCircle className="relative h-3.5 w-3.5 text-amber-400 animate-bounce" />
+            <span className="relative flex items-center justify-center h-4 w-4 shrink-0 mr-1.5" title="Action required / Waiting for user input">
+                <Bell className="relative h-3.5 w-3.5 text-amber-500 dark:text-amber-400 animate-bounce" />
+                <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500 ring-1 ring-background" />
+                </span>
             </span>
         );
     }
@@ -192,6 +195,8 @@ export function ProjectGroup({
     }
 
     const hasUnread = conversations.some(c => c.unread);
+    const hasWaiting = conversations.some(c => c.status === 'CASCADE_RUN_STATUS_WAITING_FOR_USER');
+    const hasRunning = conversations.some(c => c.status === 'CASCADE_RUN_STATUS_RUNNING');
 
     return (
         <>
@@ -237,6 +242,19 @@ export function ProjectGroup({
                                 >
                                     <Plus className="h-3.5 w-3.5" />
                                 </span>
+                                {!expanded && hasWaiting && (
+                                    <span className="relative flex items-center justify-center h-4 w-4 shrink-0 mr-0.5" title="Action required in this project">
+                                        <Bell className="relative h-3 w-3 text-amber-500 dark:text-amber-400 animate-bounce" />
+                                        <span className="absolute -top-0.5 -right-0.5 flex h-1.5 w-1.5">
+                                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-sky-500" />
+                                        </span>
+                                    </span>
+                                )}
+                                {!expanded && !hasWaiting && hasRunning && (
+                                    <span className="relative flex items-center justify-center h-4 w-4 shrink-0 mr-0.5" title="Thinking / Generating in this project">
+                                        <Brain className="h-3 w-3 text-purple-400 animate-pulse" />
+                                    </span>
+                                )}
                                 <span className="text-[10px] text-sidebar-foreground/40 tabular-nums shrink-0">
                                     {totalCount}
                                 </span>

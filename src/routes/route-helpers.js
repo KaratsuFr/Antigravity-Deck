@@ -139,4 +139,16 @@ function uriToFsPath(uri) {
     } catch { return null; }
 }
 
-module.exports = { pathToFileUri, execGitSafe, validateGitPath, resolveInst, validateWorkspacePath, uriToFsPath };
+function enrichSummariesWithWaitingStatus(summariesMap) {
+    if (!summariesMap) return summariesMap;
+    const { isCascadeWaiting } = require('../waiting-state');
+    const result = { ...summariesMap };
+    for (const [id, info] of Object.entries(result)) {
+        if (isCascadeWaiting(id)) {
+            result[id] = { ...info, status: 'CASCADE_RUN_STATUS_WAITING_FOR_USER' };
+        }
+    }
+    return result;
+}
+
+module.exports = { pathToFileUri, execGitSafe, validateGitPath, resolveInst, validateWorkspacePath, uriToFsPath, enrichSummariesWithWaitingStatus };

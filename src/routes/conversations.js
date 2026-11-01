@@ -47,7 +47,8 @@ module.exports = function setupConversationsRoutes(app) {
                 if (matchesWorkspace || (isOrphan && isDetached)) filtered[id] = info;
             }
 
-            res.json({ trajectorySummaries: filtered });
+            const { enrichSummariesWithWaitingStatus } = require('./route-helpers');
+            res.json({ trajectorySummaries: enrichSummariesWithWaitingStatus(filtered) });
         } catch (e) { res.status(500).json({ error: e.message }); }
     });
 
@@ -186,8 +187,9 @@ module.exports = function setupConversationsRoutes(app) {
         try {
             const { getSummaries } = require('../jetbox');
             const summaries = getSummaries();
+            const { enrichSummariesWithWaitingStatus } = require('./route-helpers');
             if (summaries && Object.keys(summaries).length > 0) {
-                return res.json({ trajectorySummaries: summaries });
+                return res.json({ trajectorySummaries: enrichSummariesWithWaitingStatus(summaries) });
             }
             // Fallback (Jetbox not populated yet): merge live cascade lists per unique hub conn.
             const { lsInstances } = require('../config');
@@ -202,7 +204,7 @@ module.exports = function setupConversationsRoutes(app) {
                     if (data?.trajectorySummaries) Object.assign(merged.trajectorySummaries, data.trajectorySummaries);
                 } catch { }
             }
-            res.json(merged);
+            res.json({ trajectorySummaries: enrichSummariesWithWaitingStatus(merged.trajectorySummaries) });
         }
         catch (e) { res.status(500).json({ error: e.message }); }
     });

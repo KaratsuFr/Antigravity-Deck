@@ -6,6 +6,8 @@ const { callApi, callApiOnInstance, callApiFireAndForgetOnInstance } = require('
 // NOTE: ws.js is NOT imported at top level to avoid circular dependency
 // (cache.js → ws.js → poller.js → auto-accept.js → ws.js)
 function _broadcast(data, targetConvId) { return require('./ws').broadcast(data, targetConvId); }
+function _setWaiting(id, val) { try { require('./waiting-state').setCascadeWaiting(id, val); } catch {} }
+function _isWaiting(id) { try { return require('./waiting-state').isCascadeWaiting(id); } catch { return false; } }
 const { detectApiStartIndex } = require('./step-cache');
 const fs = require('fs');
 const path = require('path');
@@ -502,6 +504,7 @@ async function handleAutoAcceptDirect(cascadeId, inst, stepInfo = null) {
             // Throttle checks for this step (10s) and send a push notification to user
             const isFirstSeen = !unhandledManualSteps.has(manualKey);
             unhandledManualSteps.set(manualKey, Date.now());
+            _setWaiting(cascadeId, true);
             console.log(`[AutoAccept] >>> Could not build interaction for ${cascadeId.substring(0, 8)} step[${stepInfo.stepIndex}] (manual gate, throttled 10s)`);
             if (isFirstSeen) {
                 try {
@@ -525,6 +528,7 @@ async function handleAutoAcceptDirect(cascadeId, inst, stepInfo = null) {
         const result = await callApiFireAndForgetOnInstance(inst, 'HandleCascadeUserInteraction', body);
         if (result.ok) {
             console.log(`[AutoAccept] +++ ACCEPTED ${cascadeId.substring(0, 8)} via ${inst.workspaceName} (port ${inst.port})`);
+            _setWaiting(cascadeId, false);
             _broadcast({ type: 'auto_accepted', conversationId: cascadeId }, cascadeId);
             // Web Push for auto-accepted
             try {
@@ -639,7 +643,6 @@ function startAutoAcceptPolling() {
 }
 
 async function autoAcceptPollNow() {
-    if (!autoAcceptEnabled) return;
     if (isAutoAcceptRunning) return; // Prevent concurrent runs
     const instances = effectiveInstances();
     if (instances.length === 0) return;
@@ -658,7 +661,10 @@ async function autoAcceptPollNow() {
                 for (const [cascadeId, info] of Object.entries(trajectories)) {
                     // Check both RUNNING and WAITING_FOR_USER cascades
                     if (info.status !== 'CASCADE_RUN_STATUS_RUNNING' &&
-                        info.status !== 'CASCADE_RUN_STATUS_WAITING_FOR_USER') continue;
+                        info.status !== 'CASCADE_RUN_STATUS_WAITING_FOR_USER') {
+                        if (_isWaiting(cascadeId)) _setWaiting(cascadeId, false);
+                        continue;
+                    }
                     const stepCount = info.stepCount || 0;
                     if (stepCount === 0) continue;
                     const trajectoryId = info.trajectoryId;
@@ -679,9 +685,21 @@ async function autoAcceptPollNow() {
                             if (realIdx < from) continue; // skip steps outside requested range
                             if (steps[i].status === 'CORTEX_STEP_STATUS_WAITING' || steps[i].status === 9) {
                                 const step = steps[i];
-                                console.log(`[AutoAccept] WAITING on ${inst.workspaceName}:${inst.port} → ${cascadeId.substring(0, 8)} step[${realIdx}] (${(step.type || '').replace('CORTEX_STEP_TYPE_', '')})`);
-                                await handleAutoAcceptDirect(cascadeId, inst, { trajectoryId, stepIndex: realIdx, step });
                                 found = true;
+                                if (autoAcceptEnabled) {
+                                    console.log(`[AutoAccept] WAITING on ${inst.workspaceName}:${inst.port} → ${cascadeId.substring(0, 8)} step[${realIdx}] (${(step.type || '').replace('CORTEX_STEP_TYPE_', '')})`);
+                                    await handleAutoAcceptDirect(cascadeId, inst, { trajectoryId, stepIndex: realIdx, step });
+                                } else {
+                                    _setWaiting(cascadeId, true);
+                                    const manualKey = `${cascadeId}:${realIdx}`;
+                                    if (!unhandledManualSteps.has(manualKey)) {
+                                        unhandledManualSteps.set(manualKey, Date.now());
+                                        try {
+                                            const { handleWaitingStepPush } = require('./push-service');
+                                            handleWaitingStepPush(cascadeId, { trajectoryId, stepIndex: realIdx, step });
+                                        } catch {}
+                                    }
+                                }
                                 break;
                             }
                         }
@@ -696,12 +714,28 @@ async function autoAcceptPollNow() {
                                     const step = decoded[i];
                                     if (step.status === 'CORTEX_STEP_STATUS_WAITING' || step.status === 9) {
                                         const stepIndex = from + i;
-                                        console.log(`[AutoAccept] WAITING (binary) on ${inst.workspaceName}:${inst.port} → ${cascadeId.substring(0, 8)} step[${stepIndex}] (${(step.type || '').replace('CORTEX_STEP_TYPE_', '')})`);
-                                        await handleAutoAcceptDirect(cascadeId, inst, { trajectoryId, stepIndex, step });
+                                        found = true;
+                                        if (autoAcceptEnabled) {
+                                            console.log(`[AutoAccept] WAITING (binary) on ${inst.workspaceName}:${inst.port} → ${cascadeId.substring(0, 8)} step[${stepIndex}] (${(step.type || '').replace('CORTEX_STEP_TYPE_', '')})`);
+                                            await handleAutoAcceptDirect(cascadeId, inst, { trajectoryId, stepIndex, step });
+                                        } else {
+                                            _setWaiting(cascadeId, true);
+                                            const manualKey = `${cascadeId}:${stepIndex}`;
+                                            if (!unhandledManualSteps.has(manualKey)) {
+                                                unhandledManualSteps.set(manualKey, Date.now());
+                                                try {
+                                                    const { handleWaitingStepPush } = require('./push-service');
+                                                    handleWaitingStepPush(cascadeId, { trajectoryId, stepIndex, step });
+                                                } catch {}
+                                            }
+                                        }
                                         break;
                                     }
                                 }
                             } catch { }
+                        }
+                        if (!found && _isWaiting(cascadeId)) {
+                            _setWaiting(cascadeId, false);
                         }
                     } catch { }
                 }

@@ -164,6 +164,7 @@ async function pollNow() {
                 const isNowDone = info.status !== 'CASCADE_RUN_STATUS_RUNNING' &&
                     info.status !== 'CASCADE_RUN_STATUS_WAITING_FOR_USER';
                 if (wasActive && isNowDone) {
+                    try { require('./waiting-state').setCascadeWaiting(cascadeId, false); } catch {}
                     triggerBridgeRelay(cascadeId);
                     // Notify frontend to refresh conversation list (summary/title may have changed)
                     _broadcastAll({ type: 'conversations_updated' });
@@ -435,33 +436,42 @@ async function pollConversation(activeConvId, info) {
             if (!quietPoll) console.log(`[poll] ${updatedCount} updated, ${newCount} new (${cache.steps.length}/${newStepCount})`);
         }
 
-        // Step-level auto-accept: detect CORTEX_STEP_STATUS_WAITING on any step
-        // Check BOTH JSON freshSteps AND binary-decoded newStepsToAdd
+        // Step-level auto-accept and waiting state detection
         const { getAutoAccept } = require('./auto-accept');
-        if (getAutoAccept()) {
-            let found = false;
-            // Check JSON-fetched steps first
-            for (let i = 0; i < freshSteps.length && !found; i++) {
-                if (freshSteps[i].status === 'CORTEX_STEP_STATUS_WAITING' || freshSteps[i].status === 9) {
-                    const stepIndex = apiStartedAt + i;
-                    const step = freshSteps[i];
+        let waitingFound = false;
+        // Check JSON-fetched steps first
+        for (let i = 0; i < freshSteps.length && !waitingFound; i++) {
+            if (freshSteps[i].status === 'CORTEX_STEP_STATUS_WAITING' || freshSteps[i].status === 9) {
+                const stepIndex = apiStartedAt + i;
+                const step = freshSteps[i];
+                waitingFound = true;
+                if (getAutoAccept()) {
                     console.log(`[AutoAccept] Found WAITING step[${stepIndex}] (JSON): ${step.type || ''}`);
                     handleAutoAccept(activeConvId, 'CASCADE_RUN_STATUS_WAITING_FOR_USER', { trajectoryId, stepIndex, step });
-                    found = true;
+                } else {
+                    try { require('./waiting-state').setCascadeWaiting(activeConvId, true); } catch {}
                 }
             }
-            // Check binary-decoded steps (for high-index steps beyond JSON range)
-            if (!found) {
-                for (let i = 0; i < newStepsToAdd.length; i++) {
-                    const step = newStepsToAdd[i];
-                    if (step.status === 'CORTEX_STEP_STATUS_WAITING' || step.status === 9) {
-                        const stepIndex = cachedLen + i;
+        }
+        // Check binary-decoded steps (for high-index steps beyond JSON range)
+        if (!waitingFound) {
+            for (let i = 0; i < newStepsToAdd.length; i++) {
+                const step = newStepsToAdd[i];
+                if (step.status === 'CORTEX_STEP_STATUS_WAITING' || step.status === 9) {
+                    const stepIndex = cachedLen + i;
+                    waitingFound = true;
+                    if (getAutoAccept()) {
                         console.log(`[AutoAccept] Found WAITING step[${stepIndex}] (binary): ${step.type || ''}`);
                         handleAutoAccept(activeConvId, 'CASCADE_RUN_STATUS_WAITING_FOR_USER', { trajectoryId, stepIndex, step });
-                        break;
+                    } else {
+                        try { require('./waiting-state').setCascadeWaiting(activeConvId, true); } catch {}
                     }
+                    break;
                 }
             }
+        }
+        if (!waitingFound && isStreamingSameCount) {
+            try { require('./waiting-state').setCascadeWaiting(activeConvId, false); } catch {}
         }
 
     } catch (e) { }

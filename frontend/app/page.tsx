@@ -11,6 +11,7 @@ import { MoreVertical, BarChart2, Download, Bell, BellOff, FolderSync, Star, Wif
 import { API_BASE } from '@/lib/config';
 import { authHeaders } from '@/lib/auth';
 import type { Project } from '@/lib/conversations';
+import { markConversationAsRead } from '@/lib/conversations';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -191,7 +192,10 @@ export default function Home() {
   // Persist currentConvId and restore on mount
   useEffect(() => {
     localStorage.setItem('antigravity-current-conv-id', JSON.stringify(currentConvId));
-  }, [currentConvId]);
+    if (currentConvId) {
+      markConversationAsRead(currentConvId, undefined, stepCount);
+    }
+  }, [currentConvId, stepCount, cascadeStatus]);
 
   useEffect(() => {
     const storedConvId = getStoredValue<string | null>('antigravity-current-conv-id', null);

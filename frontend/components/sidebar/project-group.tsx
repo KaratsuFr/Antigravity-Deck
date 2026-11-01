@@ -1,11 +1,11 @@
 "use client"
 
 import { useState, useRef } from 'react'
-import { Trash2, ChevronRight, FolderGit2, MessageSquare, Plus, Pin, Archive, ArchiveRestore, MoreHorizontal, Brain, AlertCircle, CheckCircle2, AlertTriangle } from 'lucide-react'
+import { Trash2, ChevronRight, FolderGit2, MessageSquare, Plus, Pin, Archive, ArchiveRestore, MoreHorizontal, Brain, AlertCircle, CheckCircle2, AlertTriangle, Check } from 'lucide-react'
 import { API_BASE } from '@/lib/config'
 import { authHeaders } from '@/lib/auth'
 import type { ConvRow } from '@/lib/conversations'
-import { updateConversationAnnotations } from '@/lib/conversations'
+import { updateConversationAnnotations, toggleConversationRead } from '@/lib/conversations'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -59,7 +59,7 @@ interface ProjectGroupProps {
     onUpdated?: () => void
 }
 
-export function ConvStatusDot({ status, pinned }: { status?: string; pinned?: boolean }) {
+export function ConvStatusDot({ status, pinned, unread }: { status?: string; pinned?: boolean; unread?: boolean }) {
     if (status === 'CASCADE_RUN_STATUS_RUNNING') {
         return (
             <span className="relative flex items-center justify-center h-4 w-4 shrink-0 mr-1.5" title="Thinking / Generating...">
@@ -83,18 +83,33 @@ export function ConvStatusDot({ status, pinned }: { status?: string; pinned?: bo
             </span>
         );
     }
-    if (status === 'CASCADE_RUN_STATUS_DONE' || status === 'CASCADE_RUN_STATUS_IDLE') {
+    if (status === 'CASCADE_RUN_STATUS_DONE' || status === 'CASCADE_RUN_STATUS_IDLE' || !status) {
+        if (unread) {
+            return (
+                <span title={pinned ? "Pinned (Finished, unread)" : "Finished (unread)"} className="relative inline-flex items-center justify-center h-4 w-4 shrink-0 mr-1.5">
+                    {pinned ? (
+                        <Pin className="h-3 w-3 text-amber-500 fill-amber-500" />
+                    ) : (
+                        <CheckCircle2 className="h-3.5 w-3.5 text-sky-400 dark:text-sky-400" />
+                    )}
+                    <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500 ring-1 ring-background" />
+                    </span>
+                </span>
+            );
+        }
         if (pinned) {
             return (
-                <span title="Pinned (Done)" className="inline-flex items-center gap-0.5 shrink-0 mr-1.5">
+                <span title="Pinned (Done, read)" className="inline-flex items-center gap-0.5 shrink-0 mr-1.5 opacity-70">
                     <Pin className="h-2.5 w-2.5 text-amber-500 fill-amber-500" />
-                    <CheckCircle2 className="h-3 w-3 text-emerald-500/80" />
+                    <CheckCircle2 className="h-3 w-3 text-muted-foreground" />
                 </span>
             );
         }
         return (
-            <span title="Done" className="inline-flex items-center justify-center h-4 w-4 shrink-0 mr-1.5">
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500/80" />
+            <span title="Done (read)" className="inline-flex items-center justify-center h-4 w-4 shrink-0 mr-1.5 opacity-50">
+                <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
             </span>
         );
     }
@@ -238,11 +253,19 @@ export function ProjectGroup({
                                                         }
                                                         onSelectConv(conv.id);
                                                     }}
-                                                    title={`${conv.title}\n${conv.stepCount} steps · ${conv.status || 'idle'}${conv.archived ? ' (archived)' : ''}`}
+                                                    title={`${conv.title}\n${conv.stepCount} steps · ${conv.status || 'idle'}${conv.archived ? ' (archived)' : ''}${conv.unread ? ' · Unread' : ''}`}
                                                     className={cn("text-xs peer pr-8 flex items-center min-w-0 flex-1", conv.archived && "opacity-50")}
                                                 >
-                                                    <ConvStatusDot status={conv.status} pinned={conv.pinned} />
-                                                    <span className="truncate min-w-0 flex-1">{conv.title}</span>
+                                                    <ConvStatusDot status={conv.status} pinned={conv.pinned} unread={conv.unread} />
+                                                    <span className={cn(
+                                                        "truncate min-w-0 flex-1",
+                                                        conv.unread ? "font-medium text-foreground" : "text-sidebar-foreground/80"
+                                                    )}>
+                                                        {conv.title}
+                                                    </span>
+                                                    {conv.unread && (
+                                                        <span className="h-1.5 w-1.5 rounded-full bg-sky-500 shrink-0 ml-1" />
+                                                    )}
                                                 </SidebarMenuSubButton>
                                                 <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover/conv:opacity-100 transition-opacity">
                                                     <DropdownMenu open={menuOpenId === conv.id} onOpenChange={(open) => setMenuOpenId(open ? conv.id : null)}>
@@ -252,6 +275,15 @@ export function ProjectGroup({
                                                             </Button>
                                                         </DropdownMenuTrigger>
                                                         <DropdownMenuContent align="end" className="text-xs">
+                                                            <DropdownMenuItem onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                toggleConversationRead(conv.id, Boolean(conv.unread), conv.lastModified, conv.stepCount);
+                                                                onUpdated?.();
+                                                            }}>
+                                                                <Check className="h-3.5 w-3.5 mr-2 text-sky-500" />
+                                                                {conv.unread ? "Mark as read" : "Mark as unread"}
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuSeparator />
                                                             <DropdownMenuItem onClick={(e) => handleTogglePin(e, conv)}>
                                                                 <Pin className="h-3.5 w-3.5 mr-2 text-amber-500" />
                                                                 {conv.pinned ? "Unpin conversation" : "Pin conversation"}

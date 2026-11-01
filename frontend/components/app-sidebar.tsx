@@ -62,8 +62,24 @@ import {
 } from "lucide-react"
 
 import { ConvStatusDot, ProjectGroup } from "./sidebar/project-group"
-import { updateConversationAnnotations } from "@/lib/conversations"
+import { updateConversationAnnotations, markConversationAsRead, toggleConversationRead } from "@/lib/conversations"
 import { SystemResourceSummary } from "./sidebar/system-resource-summary"
+
+const EXPANDED_STORAGE_KEY = 'antigravity-sidebar-expanded-projects';
+
+function getSavedExpandedMap(): Record<string, boolean> {
+    if (typeof window === 'undefined') return {};
+    try {
+        const raw = localStorage.getItem(EXPANDED_STORAGE_KEY);
+        return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+}
+
+function saveExpandedMap(map: Record<string, boolean>) {
+    try {
+        localStorage.setItem(EXPANDED_STORAGE_KEY, JSON.stringify(map));
+    } catch {}
+}
 
 interface AppSidebarProps {
     currentConvId: string | null
@@ -125,7 +141,7 @@ export function AppSidebar({
     const [byProject, setByProject] = useState<Map<string, ConvRow[]>>(new Map())
     const [loose, setLoose] = useState<ConvRow[]>([])
     const [loading, setLoading] = useState(true)
-    const [expandedMap, setExpandedMap] = useState<Record<string, boolean>>({})
+    const [expandedMap, setExpandedMap] = useState<Record<string, boolean>>(() => getSavedExpandedMap())
 
     const [newName, setNewName] = useState("")
     const [creating, setCreating] = useState(false)
@@ -135,6 +151,29 @@ export function AppSidebar({
     const [looseMenuOpenId, setLooseMenuOpenId] = useState<string | null>(null)
     const looseTouchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const isLooseLongPressRef = useRef(false)
+
+    const [pinnedMenuOpenId, setPinnedMenuOpenId] = useState<string | null>(null)
+    const pinnedTouchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const isPinnedLongPressRef = useRef(false)
+
+    const handlePinnedTouchStart = (convId: string) => {
+        isPinnedLongPressRef.current = false;
+        if (pinnedTouchTimerRef.current) clearTimeout(pinnedTouchTimerRef.current);
+        pinnedTouchTimerRef.current = setTimeout(() => {
+            isPinnedLongPressRef.current = true;
+            if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                try { navigator.vibrate(40); } catch {}
+            }
+            setPinnedMenuOpenId(convId);
+        }, 450);
+    };
+
+    const handlePinnedTouchEnd = () => {
+        if (pinnedTouchTimerRef.current) {
+            clearTimeout(pinnedTouchTimerRef.current);
+            pinnedTouchTimerRef.current = null;
+        }
+    };
 
     const handleLooseTouchStart = (convId: string) => {
         isLooseLongPressRef.current = false;
@@ -249,22 +288,50 @@ export function AppSidebar({
 
     const loadIndex = useCallback(async () => {
         try {
-            const { projects: projs, rows } = await loadConversationIndex()
+            const { projects: projs, rows } = await loadConversationIndex(currentConvId)
             const { byProject: bp, loose: lo } = groupByProject(rows)
             setProjects(projs)
             setByProject(bp)
             setLoose(lo)
-            // Expand the first project once, the first time we get data (AG IDE behaviour).
-            if (!didInitExpandRef.current && projs.length > 0) {
-                didInitExpandRef.current = true
-                setExpandedMap({ [projs[0].id]: true })
-            }
+
+            // Open projects that have pinned conversations or conversations in progress, waiting for user, or finished unread
+            setExpandedMap((prev) => {
+                const saved = getSavedExpandedMap()
+                const next = { ...saved, ...prev }
+                let changed = false
+
+                for (const p of projs) {
+                    const convs = bp.get(p.id) || []
+                    const hasPinOrActivity = convs.some((c) => {
+                        if (c.pinned) return true
+                        if (c.status === 'CASCADE_RUN_STATUS_RUNNING') return true
+                        if (c.status === 'CASCADE_RUN_STATUS_WAITING_FOR_USER') return true
+                        const isDoneOrIdle = c.status === 'CASCADE_RUN_STATUS_DONE' || c.status === 'CASCADE_RUN_STATUS_IDLE' || !c.status
+                        if (isDoneOrIdle && c.unread) return true
+                        return false
+                    })
+
+                    if (hasPinOrActivity) {
+                        if (!next[p.id]) {
+                            next[p.id] = true
+                            changed = true
+                        }
+                    } else if (next[p.id] === undefined && saved[p.id] !== undefined) {
+                        next[p.id] = saved[p.id]
+                    }
+                }
+
+                if (changed) {
+                    saveExpandedMap(next)
+                }
+                return next
+            })
         } catch {
             // keep previous state on transient failures
         } finally {
             setLoading(false)
         }
-    }, [])
+    }, [currentConvId])
 
     useEffect(() => {
         if (!hasLoadedRef.current) {
@@ -278,8 +345,26 @@ export function AppSidebar({
         if (conversationsVersion > 0) loadIndex()
     }, [conversationsVersion, loadIndex])
 
+    // Auto mark current active conversation as read
+    useEffect(() => {
+        if (currentConvId) {
+            markConversationAsRead(currentConvId)
+        }
+    }, [currentConvId])
+
+    // Listen for manual read/unread updates from any part of the UI
+    useEffect(() => {
+        const handler = () => { loadIndex() }
+        window.addEventListener('antigravity-read-updated', handler)
+        return () => window.removeEventListener('antigravity-read-updated', handler)
+    }, [loadIndex])
+
     const toggleProject = useCallback((projectId: string) => {
-        setExpandedMap((prev) => ({ ...prev, [projectId]: !prev[projectId] }))
+        setExpandedMap((prev) => {
+            const next = { ...prev, [projectId]: !prev[projectId] }
+            saveExpandedMap(next)
+            return next
+        })
     }, [])
 
     const handleConvDeleted = useCallback(
@@ -393,6 +478,34 @@ export function AppSidebar({
         return filtered
     }, [loose, hideArchived, maxAgeDays, convSort, currentConvId])
 
+    const pinnedConversations = useMemo(() => {
+        const list: ConvRow[] = []
+        const seen = new Set<string>()
+
+        for (const rows of byProject.values()) {
+            for (const row of rows) {
+                if (row.pinned && !seen.has(row.id)) {
+                    if (hideArchived && row.archived) continue
+                    seen.add(row.id)
+                    list.push(row)
+                }
+            }
+        }
+        for (const row of loose) {
+            if (row.pinned && !seen.has(row.id)) {
+                if (hideArchived && row.archived) continue
+                seen.add(row.id)
+                list.push(row)
+            }
+        }
+
+        list.sort((a, b) => {
+            if (convSort === 'name') return a.title.localeCompare(b.title)
+            return (b.lastModified || '').localeCompare(a.lastModified || '')
+        })
+        return list
+    }, [byProject, loose, hideArchived, convSort])
+
     const handleConfirmDelete = async () => {
         if (!deleteTarget) return
         const targetId = deleteTarget.id
@@ -458,6 +571,115 @@ export function AppSidebar({
                     </SidebarGroup>
 
                     <SidebarSeparator className="mx-0" />
+
+                    {/* Pinned conversations in header */}
+                    {pinnedConversations.length > 0 && (
+                        <>
+                            <SidebarGroup>
+                                <div className="flex items-center justify-between px-3 py-1 text-xs font-medium text-sidebar-foreground/70">
+                                    <span className="flex items-center gap-1.5 text-amber-500 font-semibold">
+                                        <Pin className="h-3 w-3 fill-amber-500" />
+                                        Pinned
+                                    </span>
+                                    <span className="text-[10px] text-sidebar-foreground/40 tabular-nums">
+                                        {pinnedConversations.length}
+                                    </span>
+                                </div>
+                                <SidebarGroupContent>
+                                    <SidebarMenu>
+                                        {pinnedConversations.map((conv) => (
+                                            <SidebarMenuItem
+                                                key={`pinned-hdr-${conv.id}`}
+                                                className="group/conv relative flex items-center select-none"
+                                                onContextMenu={(e) => {
+                                                    e.preventDefault();
+                                                    setPinnedMenuOpenId(conv.id);
+                                                }}
+                                                onTouchStart={() => handlePinnedTouchStart(conv.id)}
+                                                onTouchEnd={handlePinnedTouchEnd}
+                                                onTouchMove={handlePinnedTouchEnd}
+                                                onTouchCancel={handlePinnedTouchEnd}
+                                            >
+                                                <SidebarMenuButton
+                                                    isActive={conv.id === currentConvId}
+                                                    onClick={(e) => {
+                                                        e.preventDefault();
+                                                        if (isPinnedLongPressRef.current) {
+                                                            isPinnedLongPressRef.current = false;
+                                                            return;
+                                                        }
+                                                        onSelectConversation(conv.id, conv.projectName || 'unknown');
+                                                    }}
+                                                    tooltip={`${conv.title}${conv.projectName ? `\nProject: ${conv.projectName}` : ''}\n${conv.stepCount} steps · ${conv.status || 'idle'}${conv.archived ? ' (archived)' : ''}${conv.unread ? ' · Unread' : ''}`}
+                                                    className={cn("text-xs peer pr-8 flex items-center min-w-0 flex-1", conv.archived && "opacity-50")}
+                                                >
+                                                    <ConvStatusDot status={conv.status} pinned={true} unread={conv.unread} />
+                                                    <div className="flex flex-col min-w-0 flex-1 text-left leading-tight py-0.5">
+                                                        <span className={cn(
+                                                            "truncate min-w-0 flex-1",
+                                                            conv.unread ? "font-medium text-foreground" : "text-sidebar-foreground/80"
+                                                        )}>
+                                                            {conv.title}
+                                                        </span>
+                                                        {conv.projectName && (
+                                                            <span className="text-[10px] text-sidebar-foreground/45 truncate">
+                                                                {conv.projectName}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {conv.unread && (
+                                                        <span className="h-1.5 w-1.5 rounded-full bg-sky-500 shrink-0 ml-1" />
+                                                    )}
+                                                </SidebarMenuButton>
+                                                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover/conv:opacity-100 transition-opacity">
+                                                    <DropdownMenu open={pinnedMenuOpenId === conv.id} onOpenChange={(open) => setPinnedMenuOpenId(open ? conv.id : null)}>
+                                                        <DropdownMenuTrigger asChild>
+                                                            <Button variant="ghost" size="icon" className="h-6 w-6 p-0 text-sidebar-foreground/50 hover:text-sidebar-foreground">
+                                                                <MoreHorizontal className="h-3.5 w-3.5" />
+                                                            </Button>
+                                                        </DropdownMenuTrigger>
+                                                        <DropdownMenuContent align="end" className="text-xs">
+                                                            <DropdownMenuItem onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                toggleConversationRead(conv.id, Boolean(conv.unread), conv.lastModified, conv.stepCount);
+                                                                loadIndex();
+                                                            }}>
+                                                                <Check className="h-3.5 w-3.5 mr-2 text-sky-500" />
+                                                                {conv.unread ? "Mark as read" : "Mark as unread"}
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuSeparator />
+                                                            <DropdownMenuItem onClick={async (e) => {
+                                                                e.stopPropagation();
+                                                                await updateConversationAnnotations(conv.id, { pinned: false });
+                                                                loadIndex();
+                                                            }}>
+                                                                <Pin className="h-3.5 w-3.5 mr-2 text-amber-500" />
+                                                                Unpin conversation
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuItem onClick={async (e) => {
+                                                                e.stopPropagation();
+                                                                await updateConversationAnnotations(conv.id, { archived: !conv.archived });
+                                                                loadIndex();
+                                                            }}>
+                                                                {conv.archived ? <ArchiveRestore className="h-3.5 w-3.5 mr-2" /> : <Archive className="h-3.5 w-3.5 mr-2" />}
+                                                                {conv.archived ? "Unarchive conversation" : "Archive conversation"}
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuSeparator />
+                                                            <DropdownMenuItem onClick={() => setDeleteTarget(conv)} className="text-destructive focus:text-destructive">
+                                                                <Trash2 className="h-3.5 w-3.5 mr-2" />
+                                                                Delete conversation
+                                                            </DropdownMenuItem>
+                                                        </DropdownMenuContent>
+                                                    </DropdownMenu>
+                                                </div>
+                                            </SidebarMenuItem>
+                                        ))}
+                                    </SidebarMenu>
+                                </SidebarGroupContent>
+                            </SidebarGroup>
+                            <SidebarSeparator className="mx-0" />
+                        </>
+                    )}
 
                     {/* Projects */}
                     <SidebarGroup>
@@ -596,11 +818,19 @@ export function AppSidebar({
                                                         }
                                                         onSelectConversation(conv.id, conv.projectName || 'unknown');
                                                     }}
-                                                    tooltip={`${conv.title}\n${conv.stepCount} steps · ${conv.status || 'idle'}${conv.archived ? ' (archived)' : ''}`}
+                                                    tooltip={`${conv.title}\n${conv.stepCount} steps · ${conv.status || 'idle'}${conv.archived ? ' (archived)' : ''}${conv.unread ? ' · Unread' : ''}`}
                                                     className={cn("text-xs peer pr-8 flex items-center min-w-0 flex-1", conv.archived && "opacity-50")}
                                                 >
-                                                    <ConvStatusDot status={conv.status} pinned={conv.pinned} />
-                                                    <span className="truncate min-w-0 flex-1">{conv.title}</span>
+                                                    <ConvStatusDot status={conv.status} pinned={conv.pinned} unread={conv.unread} />
+                                                    <span className={cn(
+                                                        "truncate min-w-0 flex-1",
+                                                        conv.unread ? "font-medium text-foreground" : "text-sidebar-foreground/80"
+                                                    )}>
+                                                        {conv.title}
+                                                    </span>
+                                                    {conv.unread && (
+                                                        <span className="h-1.5 w-1.5 rounded-full bg-sky-500 shrink-0 ml-1" />
+                                                    )}
                                                 </SidebarMenuButton>
                                                 <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover/conv:opacity-100 transition-opacity">
                                                     <DropdownMenu open={looseMenuOpenId === conv.id} onOpenChange={(open) => setLooseMenuOpenId(open ? conv.id : null)}>
@@ -610,6 +840,15 @@ export function AppSidebar({
                                                             </Button>
                                                         </DropdownMenuTrigger>
                                                         <DropdownMenuContent align="end" className="text-xs">
+                                                            <DropdownMenuItem onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                toggleConversationRead(conv.id, Boolean(conv.unread), conv.lastModified, conv.stepCount);
+                                                                loadIndex();
+                                                            }}>
+                                                                <Check className="h-3.5 w-3.5 mr-2 text-sky-500" />
+                                                                {conv.unread ? "Mark as read" : "Mark as unread"}
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuSeparator />
                                                             <DropdownMenuItem onClick={async (e) => {
                                                                 e.stopPropagation();
                                                                 await updateConversationAnnotations(conv.id, { pinned: !conv.pinned });

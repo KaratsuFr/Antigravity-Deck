@@ -27,6 +27,7 @@ export interface ConvRow {
     status: string;
     archived: boolean;
     pinned: boolean;
+    unread?: boolean;
 }
 
 /** Loosely-typed shape of one trajectory summary as returned by /api/conversations. */
@@ -90,6 +91,110 @@ export async function updateConversationAnnotations(id: string, annotations: { a
     }
 }
 
+export const READ_STORAGE_KEY = 'antigravity-read-convs';
+export const READ_INIT_KEY = 'antigravity-read-convs-init';
+
+export interface ConvReadRecord {
+    lastReadTime: number; // timestamp ms
+    lastReadStepCount: number;
+}
+
+export function getLocalReadMap(): Record<string, ConvReadRecord> {
+    if (typeof window === 'undefined') return {};
+    try {
+        const raw = localStorage.getItem(READ_STORAGE_KEY);
+        return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+}
+
+export function markConversationAsRead(id: string, lastModified?: string, stepCount?: number): Record<string, ConvReadRecord> {
+    if (typeof window === 'undefined' || !id) return {};
+    try {
+        const map = getLocalReadMap();
+        const modTime = lastModified ? new Date(lastModified).getTime() : Date.now();
+        const validTime = isNaN(modTime) ? Date.now() : modTime;
+        map[id] = {
+            lastReadTime: Math.max(Date.now(), validTime),
+            lastReadStepCount: stepCount ?? (map[id]?.lastReadStepCount || 0),
+        };
+        localStorage.setItem(READ_STORAGE_KEY, JSON.stringify(map));
+        window.dispatchEvent(new CustomEvent('antigravity-read-updated', { detail: { id, read: true } }));
+        return map;
+    } catch { return {}; }
+}
+
+export function toggleConversationRead(id: string, currentlyUnread: boolean, lastModified?: string, stepCount?: number): void {
+    if (typeof window === 'undefined' || !id) return;
+    try {
+        const map = getLocalReadMap();
+        if (currentlyUnread) {
+            const modTime = lastModified ? new Date(lastModified).getTime() : Date.now();
+            const validTime = isNaN(modTime) ? Date.now() : modTime;
+            map[id] = {
+                lastReadTime: Math.max(Date.now(), validTime),
+                lastReadStepCount: stepCount ?? 0,
+            };
+        } else {
+            map[id] = {
+                lastReadTime: 0,
+                lastReadStepCount: 0,
+            };
+        }
+        localStorage.setItem(READ_STORAGE_KEY, JSON.stringify(map));
+        window.dispatchEvent(new CustomEvent('antigravity-read-updated', { detail: { id, read: currentlyUnread } }));
+    } catch {}
+}
+
+export function checkAndInitReadStates(summaries: Record<string, RawSummary>) {
+    if (typeof window === 'undefined') return;
+    try {
+        const initialized = localStorage.getItem(READ_INIT_KEY);
+        if (initialized) return;
+
+        const map = getLocalReadMap();
+        const now = Date.now();
+        for (const [id, s] of Object.entries(summaries)) {
+            const status = s.status || '';
+            const isDoneOrIdle = status === 'CASCADE_RUN_STATUS_DONE' || status === 'CASCADE_RUN_STATUS_IDLE' || !status;
+            if (isDoneOrIdle) {
+                map[id] = {
+                    lastReadTime: now,
+                    lastReadStepCount: s.stepCount || 0,
+                };
+            }
+        }
+        localStorage.setItem(READ_STORAGE_KEY, JSON.stringify(map));
+        localStorage.setItem(READ_INIT_KEY, 'true');
+    } catch {}
+}
+
+export function isConversationUnread(
+    conv: { id: string; lastModified?: string; stepCount?: number; status?: string },
+    readMap: Record<string, ConvReadRecord>,
+    currentConvId?: string | null
+): boolean {
+    if (!conv || !conv.id) return false;
+    if (currentConvId && conv.id === currentConvId) return false;
+
+    const record = readMap[conv.id];
+    if (!record) {
+        return (conv.stepCount ?? 0) > 0;
+    }
+
+    if (conv.lastModified) {
+        const modTime = new Date(conv.lastModified).getTime();
+        if (!isNaN(modTime) && modTime > record.lastReadTime + 1500) {
+            return true;
+        }
+    }
+
+    if (typeof conv.stepCount === 'number' && conv.stepCount > record.lastReadStepCount) {
+        return true;
+    }
+
+    return false;
+}
+
 /** Compact relative time, e.g. "now", "5m", "3h", "2d", "4mo", "1y". */
 export function relTime(iso: string): string {
     if (!iso) return '';
@@ -127,7 +232,7 @@ export function basename(uri: string): string {
  * a flat ConvRow[] sorted by lastModified (newest first). Conversations with no
  * project resolve `projectId` to '' (grouped under "Conversations" by callers).
  */
-export async function loadConversationIndex(): Promise<{ projects: Project[]; rows: ConvRow[] }> {
+export async function loadConversationIndex(currentConvId?: string | null): Promise<{ projects: Project[]; rows: ConvRow[] }> {
     const [pj, cv] = await Promise.all([
         fetch(`${API_BASE}/api/projects`, { headers: authHeaders() })
             .then(r => r.json()).catch(() => ({ projects: [] })),
@@ -146,6 +251,9 @@ export async function loadConversationIndex(): Promise<{ projects: Project[]; ro
     const summaries: Record<string, RawSummary> = cv.trajectorySummaries || {};
     const localPinned = getLocalPinnedSet();
 
+    checkAndInitReadStates(summaries);
+    const readMap = getLocalReadMap();
+
     const rows: ConvRow[] = Object.entries(summaries).map(([id, s]) => {
         const ws: RawWorkspaceRef = (s.workspaces && s.workspaces[0]) || {};
         const wsUri = ws.workspaceFolderAbsoluteUri || '';
@@ -161,17 +269,27 @@ export async function loadConversationIndex(): Promise<{ projects: Project[]; ro
         const projectName = proj?.name || repoName || basename(wsUri) || '';
         const isArchived = Boolean(s.annotations?.archived);
         const isPinned = Boolean(s.annotations?.pinned || localPinned.has(id));
+        const lastModified = s.lastModifiedTime || s.createdTime || '';
+        const stepCount = s.stepCount || 0;
+        const status = s.status || '';
+
+        const unread = isConversationUnread(
+            { id, lastModified, stepCount, status },
+            readMap,
+            currentConvId
+        );
 
         return {
             id,
             title: s.summary || s.annotations?.title || 'Untitled conversation',
             projectId: pid,
             projectName,
-            lastModified: s.lastModifiedTime || s.createdTime || '',
-            stepCount: s.stepCount || 0,
-            status: s.status || '',
+            lastModified,
+            stepCount,
+            status,
             archived: isArchived,
             pinned: isPinned,
+            unread,
         };
     }).sort((a, b) => {
         // Pinned conversations always come first
